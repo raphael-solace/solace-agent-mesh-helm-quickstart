@@ -24,6 +24,72 @@ spec:
     {{- end }}
   {{- end }}
   rules:
+    {{- if .Values.ingress.autoConfigurePaths }}
+    {{- /* Auto-configured paths mode (recommended) */ -}}
+    {{- $host := .Values.ingress.host }}
+    - {{- if $host }}
+      host: {{ $host | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: /login
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "sam.fullname" . }}
+                port:
+                  name: auth
+          - path: /callback
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "sam.fullname" . }}
+                port:
+                  name: auth
+          - path: /is_token_valid
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "sam.fullname" . }}
+                port:
+                  name: auth
+          - path: /user_info
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "sam.fullname" . }}
+                port:
+                  name: auth
+          - path: /refresh_token
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "sam.fullname" . }}
+                port:
+                  name: auth
+          - path: /exchange-code
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "sam.fullname" . }}
+                port:
+                  name: auth
+          - path: /api/v1/platform
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "sam.fullname" . }}
+                port:
+                  name: platform
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "sam.fullname" . }}
+                port:
+                  name: webui
+    {{- else }}
+    {{- /* Manual hosts/paths configuration mode */ -}}
     {{- range .Values.ingress.hosts }}
     - {{- if .host }}
       host: {{ .host | quote }}
@@ -40,9 +106,9 @@ spec:
                   {{- if .portName }}
                   name: {{ .portName }}
                   {{- else }}
-                    {{- /* Default to HTTP backend when using Ingress (TLS at ALB/Ingress level) */ -}}
-                  name: {{ ternary "webui-tls" "webui" $.Values.service.tls.enabled }}
+                  name: webui
                   {{- end }}
           {{- end }}
+    {{- end }}
     {{- end }}
 {{- end }}

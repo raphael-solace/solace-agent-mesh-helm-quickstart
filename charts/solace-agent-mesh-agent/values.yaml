@@ -13,18 +13,29 @@ global:
   persistence:
     namespaceId: "solace-agent-mesh"
 
-agentId: ""
+# Component: "agent" (default) or "gateway"
+component: "agent"
+
+# Component type (only used when component is "gateway")
+# Examples: "rest", "slack", "teams", "event_mesh"
+componentType: ""
+
+# Component identifier (required)
+# Use 'id' for new deployments. 'agentId' is supported for backward compatibility.
+id: ""
+agentId: ""  # Deprecated: use 'id' instead
 
 config:
-  # Agent configuration YAML (REQUIRED)
-  # Provide the agent configuration as a raw YAML string
+  # Component configuration YAML (required)
+  # Provide the configuration as a raw YAML string
   #
   # When deploymentMode=deployer: agent-deployer provides this automatically
   # When deploymentMode=standalone: you must provide this via:
-  #   --set-file config.agentYaml=/path/to/agent-config.yaml
+  #   --set-file config.yaml=/path/to/config.yaml
   #
-  # For agent configuration format, refer to Solace Agent Mesh documentation
-  agentYaml: ""
+  # 'agentYaml' is supported for backward compatibility
+  yaml: ""
+  agentYaml: ""  # Deprecated: use 'yaml' instead
 serviceAccount:
   name: solace-agent-mesh-sa
 image:
@@ -53,9 +64,6 @@ solaceBroker:
   password: "default"
   vpn: "default"
   useTemporaryQueues: true
-
-# Namespace identifier (required)
-namespace: ""
 
 # LLM Service Configuration (required)
 llmService:

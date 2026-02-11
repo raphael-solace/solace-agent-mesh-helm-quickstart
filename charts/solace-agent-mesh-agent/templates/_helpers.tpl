@@ -39,6 +39,9 @@ Selector labels
 {{- define "sam.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "sam.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
+{{- if .Values.componentType }}
+app.kubernetes.io/component: {{ .Values.componentType }}
+{{- end }}
 {{- end }}
 
 {{- define "sam.podAnnotations" -}}
@@ -279,23 +282,47 @@ Reads SUPABASE_TENANT_ID from the discovered PostgreSQL secret
 {{- end }}
 
 {{/*
-Get agent database name (namespaceId_agentId_agent)
+Get component ID with backward compatibility
+Uses 'id' if set, falls back to 'agentId' for backward compatibility
+*/}}
+{{- define "sam.componentId" -}}
+{{- if .Values.id }}
+{{- .Values.id }}
+{{- else if .Values.agentId }}
+{{- .Values.agentId }}
+{{- end }}
+{{- end }}
+
+{{/*
+Get component configuration YAML with backward compatibility
+Uses 'config.yaml' if set, falls back to 'config.agentYaml' for backward compatibility
+*/}}
+{{- define "sam.configYaml" -}}
+{{- if .Values.config.yaml }}
+{{- .Values.config.yaml }}
+{{- else if .Values.config.agentYaml }}
+{{- .Values.config.agentYaml }}
+{{- end }}
+{{- end }}
+
+{{/*
+Get component database name (namespaceId_id_component)
 */}}
 {{- define "sam.database.agentName" -}}
-{{- printf "%s_%s_agent" .Values.global.persistence.namespaceId .Values.agentId }}
+{{- printf "%s_%s_%s" .Values.global.persistence.namespaceId (include "sam.componentId" .) .Values.component }}
 {{- end }}
 
 {{/*
-Get agent database user (namespaceId_agentId_agent)
+Get component database user (namespaceId_id_component)
 */}}
 {{- define "sam.database.agentUser" -}}
-{{- printf "%s_%s_agent" .Values.global.persistence.namespaceId .Values.agentId }}
+{{- printf "%s_%s_%s" .Values.global.persistence.namespaceId (include "sam.componentId" .) .Values.component }}
 {{- end }}
 
 {{/*
-Get agent database password
+Get component database password
 - External mode: uses applicationPassword discovered from parent chart's secret
-- Embedded mode: uses legacy pattern (namespaceId_agentId_agent)
+- Embedded mode: uses legacy pattern (namespaceId_id_component)
 */}}
 {{- define "sam.database.agentPassword" -}}
 {{- $secretName := include "sam.postgresql.secretName" . }}
@@ -305,9 +332,9 @@ Get agent database password
 {{- if $applicationPassword }}
 {{- $applicationPassword }}
 {{- else }}
-{{- printf "%s_%s_agent" .Values.global.persistence.namespaceId .Values.agentId }}
+{{- printf "%s_%s_%s" .Values.global.persistence.namespaceId (include "sam.componentId" .) .Values.component }}
 {{- end }}
 {{- else }}
-{{- printf "%s_%s_agent" .Values.global.persistence.namespaceId .Values.agentId }}
+{{- printf "%s_%s_%s" .Values.global.persistence.namespaceId (include "sam.componentId" .) .Values.component }}
 {{- end }}
 {{- end }}

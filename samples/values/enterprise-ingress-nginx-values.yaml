@@ -37,6 +37,14 @@ service:
 ingress:
   enabled: true
   className: "nginx"
+
+  # Auto-configure paths (recommended)
+  # Automatically sets up routing for WebUI, Platform API, and Auth services
+  autoConfigurePaths: true
+
+  # Hostname (required for NGINX ingress)
+  host: "sam.example.com"
+
   annotations:
     # SSL redirect
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
@@ -48,34 +56,8 @@ ingress:
     # Optional: Rate limiting
     # nginx.ingress.kubernetes.io/limit-rps: "100"
 
-  hosts:
-    - host: sam.example.com  # Must specify host for NGINX
-      paths:
-        # OAuth2 Authentication endpoints
-        - path: /login
-          pathType: Prefix
-          portName: auth
-        - path: /callback
-          pathType: Prefix
-          portName: auth
-        - path: /refresh_token
-          pathType: Prefix
-          portName: auth
-        - path: /user_info
-          pathType: Prefix
-          portName: auth
-        - path: /exchange-code
-          pathType: Prefix
-          portName: auth
-        - path: /is_token_valid
-          pathType: Prefix
-          portName: auth
-        # Web UI
-        - path: /
-          pathType: Prefix
-          portName: webui
-
   # TLS configuration (cert-manager will populate this secret)
+  # REQUIRED: This triggers HTTPS URL generation for OAuth redirect URIs
   tls:
     - secretName: sam-tls
       hosts:
@@ -115,7 +97,7 @@ samDeployment:
 
   image:
     repository: gcr.io/gcp-maas-prod/solace-agent-mesh-enterprise
-    tag: v1.24.8
+    tag: 1.65.45
     pullPolicy: Always
 
   agentDeployer:

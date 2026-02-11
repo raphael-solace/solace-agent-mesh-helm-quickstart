@@ -1,30 +1,34 @@
 ---
 sidebar_position: 4
-title: Standalone Agent Deployment
+title: Standalone Agent and Workflow Deployment
 ---
 
-# Standalone Agent Deployment Guide
+# Standalone Agent and Workflow Deployment Guide
 
-This guide explains how to deploy Solace Agent Mesh agents directly, without using the agent-deployer microservice.
+This guide explains how to deploy Solace Agent Mesh agents and workflows directly, without using the `agent-deployer` microservice.
+
+:::note
+Workflows and agents are deployed in the same way. A workflow usually involves multiple agents, which can be loaded either into a single pod or across multiple pods. As with agents, you must properly configure any supporting services such as artifacts, persistent storage, LLMs, event brokers, and namespaces.
+:::
 
 ## Overview
 
-There are two ways to deploy SAM agents:
+There are two ways to deploy SAM agents and workflows:
 
-1. **Via Agent Deployer** (Default): The SAM platform includes an agent-deployer microservice that dynamically deploys agents via the UI/API
-2. **Standalone Deployment** (This Guide): Deploy agents directly using `helm install` commands
+1. **Via Agent Deployer** (Default): The SAM platform includes an agent-deployer microservice that dynamically deploys agents via the UI/API (only available for agents)
+2. **Standalone Deployment** (This Guide): Deploy agents and workflows directly using `helm install` commands
 
 ## When to Use Standalone Deployment
 
 Use standalone deployment when you:
-- Want to deploy agents independently of the main SAM platform
-- Need direct control over agent deployment and lifecycle
-- Want to manage agents using GitOps workflows
-- Are deploying agents in different clusters/namespaces
+- Want to deploy agents or workflows independently of the main SAM platform
+- Need direct control over agent or workflow deployment and lifecycle
+- Want to manage agents or workflows using GitOps workflows
+- Are deploying agents or workflows in different clusters/namespaces
 
 ## Prerequisites
 
-Before deploying a standalone agent, you need:
+Before deploying a standalone agent or workflow, you need:
 
 1. **Kubernetes cluster** with kubectl access
 2. **Helm 3.19.0+** installed
@@ -32,15 +36,21 @@ Before deploying a standalone agent, you need:
 4. **S3-compatible storage** - agent needs object storage for file handling
 5. **Solace Event Broker** - connection URL and credentials
 6. **LLM Service** - API endpoint and credentials (e.g., OpenAI)
-7. **Agent configuration file** - YAML file defining which agents/services to enable
+- A Kubernetes cluster with kubectl access
+- Helm 3.19.0+ installed
+- PostgreSQL database (version 17+). The agent needs a database for state management
+- S3-compatible storage. The agent needs object storage for file handling.
+- Solace Event Broker. You will need the connection URL and credentials.
+- LLM Service (e.g., OpenAI). You will need the API endpoint and credentials.
+- Agent configuration file. The YAML file defining which agents/services to enable.
 
 ## Deployment Steps
 
-### Step 1: Prepare Agent Configuration File
+### Step 1: Prepare Agent or Workflow Configuration File
 
-Create an agent configuration file (e.g., `my-agent-config.yaml`) that defines which agents and services to enable. Refer to the Solace Agent Mesh documentation for the configuration format.
+Create an agent or workflow configuration file (e.g., `my-agent-config.yaml`) that defines which agents and services to enable. Refer to the Solace Agent Mesh documentation for the configuration format.
 
-Example structure (format may vary - consult SAM docs):
+Example agent structure (format may vary - consult SAM docs):
 ```yaml
 agents:
   - name: web_request
@@ -48,6 +58,48 @@ agents:
   - name: global
     enabled: true
 # ... additional configuration
+```
+
+Example workflow structure:
+```yaml
+apps:
+  - name: my_workflow
+    app_module: solace_agent_mesh.workflow.app
+    broker:
+      # ... broker configuration
+
+    app_config:
+      namespace: ${NAMESPACE}
+      agent_name: "MyWorkflow"
+
+      workflow:
+        description: "Process incoming orders"
+        version: "1.0.0"
+
+        input_schema:
+          type: object
+          properties:
+            order_id:
+              type: string
+          required: [order_id]
+
+        nodes:
+          - id: validate_order
+            type: agent
+            agent_name: "OrderValidator"
+            input:
+              order_id: "{{workflow.input.order_id}}"
+
+          - id: process_payment
+            type: agent
+            agent_name: "PaymentProcessor"
+            depends_on: [validate_order]
+            input:
+              order_data: "{{validate_order.output}}"
+
+        output_mapping:
+          status: "{{process_payment.output.status}}"
+          confirmation: "{{process_payment.output.confirmation_number}}"
 ```
 
 ### Step 2: Prepare Values File
@@ -60,7 +112,7 @@ curl -O https://raw.githubusercontent.com/SolaceProducts/solace-agent-mesh-helm-
 Edit `agent-standalone-values.yaml` and configure:
 
 **Required Configuration:**
-- `agentId`: Unique identifier for this agent instance
+- `agentId`: Unique identifier for this agent or workflow instance
 - `solaceBroker`: Broker connection details
 - `llmService`: LLM service configuration
 - `persistence`: Database and S3 credentials
@@ -90,14 +142,15 @@ persistence:
 
 ### Step 3: Create Service Account (If Not Exists)
 
-The agent needs a Kubernetes service account with permissions to access secrets:
+The agent or workflow needs a Kubernetes service account with permissions to access secrets:
 
 ```bash
 kubectl create serviceaccount solace-agent-mesh-sa -n your-namespace
 ```
 
-### Step 4: Install the Agent Chart
+### Step 4: Install the Agent or Workflow Chart
 
+- **Agent**
 ```bash
 helm install my-agent solace-agent-mesh/sam-agent \
   -f agent-standalone-values.yaml \
@@ -105,20 +158,28 @@ helm install my-agent solace-agent-mesh/sam-agent \
   -n your-namespace
 ```
 
+- **Workflow**
+```bash
+helm install my-workflow solace-agent-mesh/sam-agent \
+  -f agent-standalone-values.yaml \
+  --set-file config.agentYaml=./my-workflow-config.yaml \
+  -n your-namespace
+```
+
 **Important Parameters:**
-- `my-agent`: Helm release name (choose a unique name per agent)
+- `my-agent`: Helm release name (choose a unique name per agent or workflow)
 - `-f agent-standalone-values.yaml`: Your customized values file
-- `--set-file config.agentYaml=...`: Path to your agent configuration file
+- `--set-file config.agentYaml=...`: Path to your agent or workflow or workflow configuration file
 - `-n your-namespace`: Kubernetes namespace to deploy into
 
 ### Step 5: Verify Deployment
 
-Check the agent pod is running:
+Check the agent or workflow pod is running:
 ```bash
 kubectl get pods -n your-namespace -l app.kubernetes.io/name=sam-agent
 ```
 
-Check agent logs:
+Check the agent or workflow logs:
 ```bash
 kubectl logs -n your-namespace -l app.kubernetes.io/name=sam-agent --tail=100 -f
 ```
@@ -220,10 +281,11 @@ kubectl logs -n your-namespace -l app.kubernetes.io/name=sam-agent -c sam
 - Referenced agents/services don't exist
 - Missing required configuration fields
 
-## Upgrading Agents
+## Upgrading Agents or Workflows
 
-To upgrade an agent deployment:
+To upgrade an agent or workflow deployment:
 
+- **Agent**
 ```bash
 helm upgrade my-agent solace-agent-mesh/sam-agent \
   -f agent-standalone-values.yaml \
@@ -231,12 +293,26 @@ helm upgrade my-agent solace-agent-mesh/sam-agent \
   -n your-namespace
 ```
 
-## Uninstalling Agents
+- **Workflow**
+```bash
+helm upgrade my-workflow solace-agent-mesh/sam-agent \
+  -f agent-standalone-values.yaml \
+  --set-file config.agentYaml=./my-workflow-config.yaml \
+  -n your-namespace
+```
 
-To remove an agent:
+## Uninstalling Agents or Workflows
 
+To remove an agent or workflow:
+
+- **Agent**
 ```bash
 helm uninstall my-agent -n your-namespace
+```
+
+- **Workflow**
+```bash
+helm uninstall my-workflow -n your-namespace
 ```
 
 **Note:** This does NOT delete:
@@ -300,7 +376,7 @@ environmentVariables:
 
 ## Next Steps
 
-- Consult Solace Agent Mesh documentation for agent configuration format
+- See Solace Agent Mesh documentation for agent or workflow configuration format
 - Set up monitoring and alerting for your agents
 - Implement backup strategies for agent databases
 - Consider using external-secrets operator for credential management

@@ -1,9 +1,15 @@
+{{- if not (include "sam.componentId" .) }}
+{{- fail "id is required. Please provide --set id=<your-component-id> (or --set agentId=<id> for backward compatibility)" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "sam.fullname" . }}
   labels:
     {{- include "sam.labels" . | nindent 4 }}
+    {{- if and (eq .Values.component "gateway") .Values.componentType }}
+    componentType: {{ .Values.componentType | quote }}
+    {{- end }}
   {{- include "sam.annotations" . | nindent 2 }}
 spec:
   replicas: {{ .Values.replicaCount }}
@@ -22,13 +28,21 @@ spec:
     metadata:
       annotations:
         {{- include "sam.podAnnotations" . | nindent 8 }}
-        checksum/config: {{ include (print $.Template.BasePath "/agent-config.yaml") . | sha256sum }}
+        checksum/config: {{ include (print $.Template.BasePath "/component-config.yaml") . | sha256sum }}
         checksum/env: {{ include (print $.Template.BasePath "/secret-env-vars.yaml") . | sha256sum }}
+        checksum/loggingConfig: {{ include (print $.Template.BasePath "/logging-configmap.yaml") . | sha256sum }}
       labels:
         {{- include "sam.selectorLabels" . | nindent 8 }}
         {{- include "sam.podLabels" . | nindent 8 }}
+        {{- if and (eq .Values.component "gateway") .Values.componentType }}
+        componentType: {{ .Values.componentType | quote }}
+        {{- end }}
     spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}
+      {{- if .Values.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret }}
+      {{- end }}
       {{- if .Values.podSecurityContext }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
@@ -65,18 +79,22 @@ spec:
               psql -d "$DATABASE_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \"$DATABASE_USER\";" || true
       containers:
         - name: sam
+          env:
+            - name: LOGGING_CONFIG_PATH
+              value: /app/config/logging/logging_config.yaml
           envFrom:
             - secretRef:
                 name: {{ include "sam.fullname" . }}-persistence
             - secretRef:
                 name: {{ include "sam.fullname" . }}-env-vars
           command: ["solace-agent-mesh", "run", "--system-env", "/app/config/agent.yaml"]
-          {{- if .Values.securityContext }}
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            {{- with .Values.securityContext }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             runAsUser: 999
             runAsGroup: 999
-          {{- end }}
+            runAsNonRoot: true
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- if .Values.resources }}
@@ -110,6 +128,9 @@ spec:
               mountPath: /app/config/agent.yaml
               subPath: agent.yaml
               readOnly: true
+            - name: logging-config-volume
+              mountPath: /app/config/logging
+              readOnly: true
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -124,3 +145,6 @@ spec:
         - name: config-volume
           configMap:
             name: {{ include "sam.fullname" . }}-config
+        - name: logging-config-volume
+          configMap:
+            name: {{ include "sam.fullname" . }}-logging-config

@@ -17,7 +17,7 @@ This Helm chart deploys Solace Agent Mesh (SAM) in enterprise mode on Kubernetes
   - [Step 4: Install the Chart](#step-4-install-the-chart)
 - [Accessing SAM](#accessing-sam)
   - [Network Configuration](#network-configuration)
-- [Standalone Agent Deployment](#standalone-agent-deployment)
+- [Standalone Agent and Workflow Deployment](#standalone-agent-deployment)
 - [Upgrading](#upgrading)
 - [Uninstalling](#uninstalling)
 - [Configuration Options](#configuration-options)
@@ -68,7 +68,7 @@ SAM requires access to container images. You have two options:
 
 **Option 1: Use Solace Cloud Image Pull Secret (Recommended)**
 
-Obtain the image pull secret from Solace Cloud following the instructions at [Download Image Pull Secret](https://docs.solace.com/Cloud/private_regions_tab.htm?Highlight=create%20a%20private%20region#Download).
+Obtain the image pull secret from Solace Cloud following the instructions in the [Downloading Registry Credentials](https://docs.solace.com/Cloud/private_regions_tab.htm#Download) section of the Solace Cloud documentation.
 
 Create the secret in your Kubernetes cluster:
 
@@ -126,17 +126,30 @@ cp samples/values/sam-tls-oidc-bundled-persistence.yaml custom-values.yaml
 - `sam.authenticationRbac.users`: User email addresses and roles
 - `broker.*`: Your Solace broker credentials
 - `llmService.*`: Your LLM service credentials
-- `samDeployment.imagePullSecret`: **Required** - Name of the image pull secret created in Step 2 (e.g., `solace-image-pull-secret` or `my-registry-secret`)
-- `samDeployment.image.repository`: Image repository path (if using your own registry from Step 2, Option 2)
-- `samDeployment.image.tag`: SAM application image version (if using specific version)
+- `samDeployment.imagePullSecret`: **Required** the name of the image pull secret you created in Step 2 (e.g., `solace-image-pull-secret` or `my-registry-secret`)
+- `samDeployment.image.repository`: The image repository path (if you are using your own registry from Step 2, Option 2).
+- `samDeployment.image.tag`: The version of the SAM application image (if you are using a specific version). 
 - `samDeployment.agentDeployer.image.repository`: Agent deployer image repository path (if using your own registry from Step 2, Option 2)
 - `samDeployment.agentDeployer.image.tag`: Agent deployer image version (if using specific version)
 
 ### Step 4: Install the Chart
 
-Install using Helm with your custom values and TLS certificates:
+Install using Helm with your custom values:
 
 ```bash
+helm install agent-mesh solace-agent-mesh/solace-agent-mesh \
+  -f custom-values.yaml
+```
+
+**For LoadBalancer/NodePort with TLS**, provide certificates using one of these methods:
+
+```bash
+# Option 1: Reference an existing TLS secret (recommended)
+helm install agent-mesh solace-agent-mesh/solace-agent-mesh \
+  -f custom-values.yaml \
+  --set service.tls.existingSecret=my-tls-secret
+
+# Option 2: Provide certificates via --set-file
 helm install agent-mesh solace-agent-mesh/solace-agent-mesh \
   -f custom-values.yaml \
   --set-file service.tls.cert=/path/to/tls.crt \
@@ -152,10 +165,7 @@ helm search repo solace-agent-mesh/solace-agent-mesh --versions
 # Install specific version
 helm install agent-mesh solace-agent-mesh/solace-agent-mesh \
   --version 1.0.0 \
-  -f custom-values.yaml \
-  --set-file service.tls.cert=/path/to/tls.crt \
-  --set-file service.tls.key=/path/to/tls.key \
-  --set service.tls.passphrase="your-passphrase"
+  -f custom-values.yaml
 ```
 
 **Note**: TLS certificates are only required when using `service.type: LoadBalancer` or `NodePort`. When using Ingress, TLS is managed at the Ingress level. See the [Network Configuration Guide](network-configuration) for details.
@@ -178,11 +188,11 @@ SAM can be accessed through LoadBalancer, NodePort, Ingress, or port-forward dep
 
 For detailed network configuration options, access methods, and production deployment recommendations, see the [Network Configuration Guide](network-configuration).
 
-## Standalone Agent Deployment
+## Standalone Agent and Workflow Deployment
 
 While SAM includes an agent-deployer microservice that dynamically deploys agents via the UI/API, you can also deploy agents independently using direct Helm commands. This approach is useful for GitOps workflows, multi-cluster deployments, or independent agent management.
 
-For detailed instructions, see the [Standalone Agent Deployment](standalone-agent-deployment) guide.
+For detailed instructions, see the [Standalone Agent and Workflow Deployment](standalone-agent-deployment) section.
 
 ## Upgrading
 
@@ -191,6 +201,135 @@ Before upgrading, always update your Helm repository to get the latest chart ver
 ```bash
 helm repo update solace-agent-mesh
 ```
+
+### Platform Service Architecture (v1.1.0+)
+
+Starting with v1.1.0, SAM splits platform management APIs into a separate service for improved architecture and scalability:
+
+- **WebUI Service** (port 8000/8443): Web interface and gateway
+- **Platform Service** (port 8001/4443): Platform management APIs (agents, deployments, connectors, toolsets)
+
+**The upgrade is seamless** - no manual configuration changes required.
+
+#### For Ingress Users
+
+Simply run `helm upgrade` with your existing values file:
+
+```bash
+helm upgrade <release-name> solace-agent-mesh/solace-agent-mesh \
+  -f your-existing-values.yaml \
+  -n <namespace>
+```
+
+**What happens automatically:**
+- `autoConfigurePaths: true` is enabled by default
+- Platform routes (`/api/v1/platform/*`) are automatically configured
+- Auth routes (`/login`, `/callback`, etc.) are automatically configured
+- Your existing settings (annotations, className, TLS, etc.) are preserved
+- Zero downtime - Kubernetes updates Ingress resource in-place
+
+**Verification:**
+```bash
+# Check WebUI health
+curl -k https://sam.example.com/health
+
+# Check Platform API health
+curl -k https://sam.example.com/api/v1/platform/health
+```
+
+#### For LoadBalancer Users
+
+Simply run `helm upgrade` with your existing values file:
+
+```bash
+helm upgrade <release-name> solace-agent-mesh/solace-agent-mesh \
+  -f your-existing-values.yaml \
+  -n <namespace>
+```
+
+**What happens automatically:**
+- Platform service ports (4443 HTTPS, 8080 HTTP) are added to LoadBalancer
+- WebUI continues on existing ports (443 HTTPS, 80 HTTP)
+- Same external IP - just additional ports exposed
+- No DNS changes needed
+
+**Access after upgrade:**
+
+With TLS enabled:
+- Web UI: `https://<EXTERNAL-IP>` (unchanged)
+- Platform API: `https://<EXTERNAL-IP>:4443` (new)
+
+Without TLS:
+- Web UI: `http://<EXTERNAL-IP>` (unchanged)
+- Platform API: `http://<EXTERNAL-IP>:8080` (new)
+
+**Verification:**
+```bash
+# Get external IP
+EXTERNAL_IP=$(kubectl get svc <release-name> -n <namespace> -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+# Check WebUI health (port 443 or 80)
+curl -k https://$EXTERNAL_IP/health
+
+# Check Platform API health (port 4443 or 8080)
+curl -k https://$EXTERNAL_IP:4443/api/v1/platform/health
+```
+
+#### For Local Development Users (Port-Forward)
+
+If you're using `kubectl port-forward` for local development:
+
+```bash
+kubectl port-forward svc/<release-name> 8000:80 8001:8001
+```
+
+**Important:** Use port 8000 specifically - it's pre-configured in CORS allowed origins. Using other ports will cause CORS errors. See [Network Configuration - Local Development](network-configuration#local-development-with-port-forward) for details.
+
+---
+
+### Bundled Persistence VCT Labels (Upgrading from ≤1.1.0)
+
+:::warning Migration Required
+This section only applies if you are using **bundled persistence** (`global.persistence.enabled: true`) and upgrading from chart version ≤1.1.0. External persistence users and new installations are **not affected**.
+:::
+
+Starting with chart versions after 1.1.0, the bundled persistence layer uses minimal VolumeClaimTemplate (VCT) labels for StatefulSets. This change prevents upgrade failures when labels change over time, but requires a one-time migration for existing deployments.
+
+**Why this matters:** Kubernetes StatefulSet VCT labels are immutable. Without migration, upgrades will fail with:
+```
+StatefulSet.apps "xxx-postgresql" is invalid: spec: Forbidden: updates to statefulset spec
+for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy'... are forbidden
+```
+
+#### Migration Procedure
+
+**Step 1:** Delete StatefulSets while preserving data (PVCs are retained):
+
+```bash
+kubectl delete sts <release>-postgresql <release>-seaweedfs --cascade=orphan -n <namespace>
+```
+
+**Step 2:** Upgrade the Helm release:
+
+```bash
+helm upgrade <release> solace-agent-mesh/solace-agent-mesh \
+  -f your-values.yaml \
+  -n <namespace>
+```
+
+**Step 3:** Verify the upgrade succeeded and data is intact:
+
+```bash
+# Check pods are running
+kubectl get pods -l app.kubernetes.io/instance=<release> -n <namespace>
+
+# Verify PVCs are still bound
+kubectl get pvc -l app.kubernetes.io/instance=<release> -n <namespace>
+```
+
+The new StatefulSets are created with minimal VCT labels and automatically reattach to the existing PVCs, preserving all your data.
+
+---
 
 ### Upgrading SAM Core Deployment
 
@@ -247,18 +386,18 @@ kubectl rollout status deployment/agent-mesh-core -n <namespace>
 kubectl get pods -n <namespace> -l app.kubernetes.io/instance=agent-mesh
 ```
 
-### Upgrading SAM Agents
+### Upgrading SAM Agents and Workflows
 
-To upgrade individual agents deployed through SAM, use the agent's release name and update the image tag:
+To upgrade an individual agent or workflow deployed using SAM, use its release name and update its image tag:
 
-**Important:** If the agent chart name has changed between versions, you may need to delete and recreate the agent deployment instead of upgrading. See [Troubleshooting](#troubleshooting) below.
+**Important:** If the agent or workflow chart name has changed between versions, you may need to delete and recreate the agent deployment instead of upgrading. See [Troubleshooting](#troubleshooting) below.
 
 ```bash
 # Update Helm repository first
 helm repo update solace-agent-mesh
 
-# Upgrade the agent with new image version
-helm upgrade -i <agent-release-name> solace-agent-mesh/sam-agent \
+# Upgrade the agent or workflow with new image version
+helm upgrade -i <agent or workflow-release-name> solace-agent-mesh/sam-agent \
   -n <namespace> \
   --reuse-values \
   --set image.tag=<new-version>
@@ -269,14 +408,14 @@ helm upgrade -i <agent-release-name> solace-agent-mesh/sam-agent \
 helm upgrade -i sam-agent-0a42a319-13a8-4b31-b696-9f750d5c6a20 solace-agent-mesh/sam-agent \
   -n fwanssa \
   --reuse-values \
-  --set image.tag=v1.24.8
+  --set image.tag=1.65.45
 ```
 
-**Verify the agent upgrade:**
+**Verify the agent or workflow upgrade:**
 
 ```bash
-kubectl get deployment <agent-release-name> -n <namespace>
-kubectl logs deployment/<agent-release-name> -n <namespace> --tail=50
+kubectl get deployment <agent or workflow-release-name> -n <namespace>
+kubectl logs deployment/<agent or workflow-release-name> -n <namespace> --tail=50
 ```
 
 ## Uninstalling

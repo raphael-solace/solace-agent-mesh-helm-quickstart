@@ -29,11 +29,14 @@ This guide explains the different ways to expose SAM (Solace Agent Mesh) to the 
 
 SAM requires external access for users to access the Web UI and for OAuth2/OIDC authentication flows. Kubernetes provides multiple methods to expose services externally, each with different trade-offs.
 
-**SAM exposes three ports:**
+**SAM exposes these ports:**
 - **Port 80/443**: Web UI (HTTP/HTTPS)
+- **Port 8080/4443**: Platform Service API (HTTP/HTTPS) - Enterprise feature
 - **Port 5050**: OAuth2 Authentication Server
 
 All ports are HTTP-based and can be exposed through any of the methods below.
+
+**Note:** Platform Service (port 8080/4443) is only available in SAM Enterprise deployments.
 
 ---
 
@@ -70,6 +73,59 @@ kubectl port-forward -n <namespace> svc/sam 8443:443
 **Cons:**
 - ❌ Requires port-forward for local access
 - ❌ Not suitable for team/production use
+
+#### Local Development with Port-Forward
+
+For local development (minikube, kind, Docker Desktop), you have two options:
+
+**Option A: Use the local development sample file (Recommended)**
+
+The [`local-k8s-values.yaml`](https://github.com/SolaceProducts/solace-agent-mesh-helm-quickstart/blob/main/samples/values/local-k8s-values.yaml) sample includes CORS configuration that allows any localhost port:
+
+```bash
+helm install agent-mesh solace-agent-mesh/solace-agent-mesh -f local-k8s-values.yaml
+```
+
+With this sample, you can use any port or even `minikube service`:
+```bash
+# Any port works
+kubectl port-forward svc/<release-name> 9000:80 9001:8001
+
+# Or use minikube service
+minikube service <release-name>
+```
+
+**Option B: Use specific ports (if not using the sample file)**
+
+If you're using custom values without `sam.cors.allowedOriginRegex`, use these pre-configured ports:
+
+| Port | Service | Purpose |
+|------|---------|---------|
+| 8000 | WebUI | Web interface and Gateway API |
+| 8001 | Platform Service | Enterprise features (agent builder, deployments, connectors) |
+
+```bash
+kubectl port-forward -n <namespace> svc/<release-name> 8000:80 8001:8001
+```
+
+**Why port 8000?** It's pre-configured in the Platform Service CORS allowed origins. Using other ports without the CORS regex will cause cross-origin errors.
+
+**Pre-configured CORS origins (without regex):**
+- `http://localhost:8000` ✅
+- `http://localhost:3000` ✅
+- Other ports ❌ (will cause CORS errors)
+
+**Adding CORS regex to custom values:**
+
+If you have a custom values file and want to enable any localhost port, add:
+
+```yaml
+sam:
+  cors:
+    allowedOriginRegex: "https?://(localhost|127\\.0\\.0\\.1):\\d+"
+```
+
+This uses Python's `re.fullmatch()` to match origins. Leave empty for production deployments.
 
 ---
 
@@ -188,11 +244,10 @@ service:
 ingress:
   enabled: true
   className: "nginx"  # or "alb", "traefik", etc.
-  hosts:
-    - host: sam.example.com
-      paths:
-        - path: /
-          pathType: Prefix
+  autoConfigurePaths: true  # Recommended - automatically configures all routes
+  host: "sam.example.com"
+  annotations: {}
+  tls: []
 ```
 
 See [Ingress Configuration](#ingress-configuration) section below for detailed examples.
@@ -200,6 +255,65 @@ See [Ingress Configuration](#ingress-configuration) section below for detailed e
 ---
 
 ## Ingress Configuration
+
+SAM provides two approaches for configuring ingress paths: **automatic** (recommended) and **manual** (advanced).
+
+### Automatic Path Configuration (Recommended)
+
+The chart automatically configures all required ingress paths when `autoConfigurePaths: true` (default):
+
+```yaml
+ingress:
+  enabled: true
+  className: "alb"  # or "nginx", "gce", etc.
+  autoConfigurePaths: true  # Default - automatically configures all routes
+  host: "sam.example.com"  # Optional, leave empty for ALB
+  annotations:
+    # Provider-specific annotations
+```
+
+**What gets configured automatically:**
+- `/login`, `/callback`, `/is_token_valid`, `/user_info`, `/refresh_token`, `/exchange-code` → Auth Service (port 5050)
+- `/api/v1/platform/*` → Platform Service (port 8080/4443)
+- `/*` → WebUI Service (port 80/443)
+
+**Benefits:**
+- ✅ Simpler configuration (3-5 lines vs 20+ lines)
+- ✅ Always up-to-date with latest routing requirements
+- ✅ Seamless upgrades (new routes added automatically)
+- ✅ Reduces configuration errors
+
+### Manual Path Configuration (Advanced)
+
+For advanced use cases requiring custom routing, set `autoConfigurePaths: false`:
+
+```yaml
+ingress:
+  enabled: true
+  className: "nginx"
+  autoConfigurePaths: false  # Advanced: manual control
+  hosts:
+    - host: "sam.example.com"
+      paths:
+        - path: /api/v1/platform
+          pathType: Prefix
+          portName: platform
+        - path: /login
+          pathType: Prefix
+          portName: auth
+        - path: /
+          pathType: Prefix
+          portName: webui
+```
+
+**When to use manual configuration:**
+- Custom path routing requirements
+- Integration with existing ingress rules
+- Advanced traffic splitting scenarios
+
+**Note:** When using manual configuration, you must include all required paths (auth, platform, webui) or platform features will not be accessible.
+
+---
 
 ### AWS ALB Ingress
 
@@ -210,7 +324,7 @@ See [Ingress Configuration](#ingress-configuration) section below for detailed e
 - ACM certificate for TLS
 - Subnets configured for ALB
 
-**Configuration:**
+**Recommended Configuration (Automatic Paths):**
 
 ```yaml
 service:
@@ -221,6 +335,11 @@ service:
 ingress:
   enabled: true
   className: "alb"
+
+  # Automatic path configuration (recommended)
+  autoConfigurePaths: true
+  host: ""  # Empty for ALB (accepts all traffic)
+
   annotations:
     # ALB configuration
     alb.ingress.kubernetes.io/scheme: internet-facing
@@ -228,19 +347,52 @@ ingress:
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
 
     # TLS certificate (ACM)
+    # REQUIRED: Triggers HTTPS URL generation for OAuth
     alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:REGION:ACCOUNT:certificate/ID
 
     # SSL redirect
-    alb.ingress.kubernetes.io/ssl-redirect: '{"Type": "redirect", "RedirectConfig": { "Protocol": "HTTPS", "Port": "443", "StatusCode": "HTTP_301"}}'
+    alb.ingress.kubernetes.io/actions.ssl-redirect: '{"Type": "redirect", "RedirectConfig": { "Protocol": "HTTPS", "Port": "443", "StatusCode": "HTTP_301"}}'
 
-    # Health check
-    alb.ingress.kubernetes.io/healthcheck-path: /
+    # Health check (checks webui service for overall pod health)
+    # Note: Platform service has its own health endpoint at /api/v1/platform/health
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
     alb.ingress.kubernetes.io/success-codes: "200"
 
-    # Subnets for ALB
+    # REQUIRED: Subnets for ALB placement
     alb.ingress.kubernetes.io/subnets: subnet-xxx,subnet-yyy
 
     # External DNS (optional)
+    external-dns.alpha.kubernetes.io/hostname: sam.example.com
+```
+
+**Advanced Configuration (Manual Paths):**
+
+<details>
+<summary>Click to expand manual path configuration</summary>
+
+```yaml
+service:
+  type: ClusterIP
+  tls:
+    enabled: false  # ALB handles TLS termination
+
+ingress:
+  enabled: true
+  className: "alb"
+
+  # Manual path configuration
+  autoConfigurePaths: false
+
+  annotations:
+    # Same annotations as above
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:REGION:ACCOUNT:certificate/ID
+    alb.ingress.kubernetes.io/actions.ssl-redirect: '{"Type": "redirect", "RedirectConfig": { "Protocol": "HTTPS", "Port": "443", "StatusCode": "HTTP_301"}}'
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/subnets: subnet-xxx,subnet-yyy
     external-dns.alpha.kubernetes.io/hostname: sam.example.com
 
   hosts:
@@ -253,20 +405,25 @@ ingress:
         - path: /callback
           pathType: Prefix
           portName: auth
-        - path: /refresh_token
-          pathType: Prefix
-          portName: auth
-        - path: /user_info
+        - path: /is_token_valid
           pathType: Prefix
           portName: auth
         - path: /exchange-code
           pathType: Prefix
           portName: auth
+        # Platform service API (enterprise only, must be before broader /api paths)
+        # Health endpoint: /api/v1/platform/health
+        - path: /api/v1/platform
+          pathType: Prefix
+          portName: platform
         # Web UI → port 80 (HTTP backend, TLS at ALB)
         - path: /
           pathType: Prefix
           portName: webui
 ```
+
+</details>
+
 
 **Traffic Flow:**
 ```
@@ -276,7 +433,10 @@ AWS ALB (TLS termination via ACM)
    ↓
 HTTP (internal VPC traffic)
    ↓
-Kubernetes Service
+Kubernetes Service (routes to appropriate port based on path)
+   ├─ /api/v1/platform/* → Platform Service (port 8080 → 8001)
+   ├─ /login, /callback, etc. → Auth Service (port 5050)
+   └─ / (catch-all) → Web UI (port 80 → 8000)
    ↓
 SAM Pods
 ```
@@ -286,6 +446,22 @@ SAM Pods
 - No need for TLS certificates in Kubernetes
 - Backend communication via HTTP (secure within VPC)
 - External DNS automatically creates Route53 records
+- Path-based routing directs requests to appropriate services:
+  - `/api/v1/platform/*` → Platform Service (enterprise only)
+  - `/login`, `/callback`, etc. → OAuth2 Service
+  - All other paths → Web UI
+
+:::warning Required Annotations for OAuth
+When using OAuth2/OIDC authentication with ALB:
+- **certificate-arn** is **REQUIRED** - Without it, the chart generates HTTP URLs instead of HTTPS, causing OAuth redirect URI mismatches
+- **subnets** is **REQUIRED** - ALB needs to know which VPC subnets to use
+
+See [HTTPS Auto-Detection and OAuth Requirements](#https-auto-detection-and-oauth-requirements) for details.
+:::
+
+**Health Endpoints:**
+- Overall pod health: `https://sam.example.com/health` (webui service)
+- Platform service health: `https://sam.example.com/api/v1/platform/health` (enterprise only)
 
 ---
 
@@ -344,6 +520,14 @@ ingress:
         - path: /exchange-code
           pathType: Prefix
           portName: auth
+        - path: /is_token_valid
+          pathType: Prefix
+          portName: auth
+        # Platform service API (enterprise only)
+        # Health endpoint: /api/v1/platform/health
+        - path: /api/v1/platform
+          pathType: Prefix
+          portName: platform
         # Web UI → port 80 (HTTP backend, TLS at Ingress)
         - path: /
           pathType: Prefix
@@ -494,6 +678,14 @@ ingress:
         - path: /exchange-code
           pathType: Prefix
           portName: auth
+        - path: /is_token_valid
+          pathType: Prefix
+          portName: auth
+        # Platform service API (enterprise only)
+        # Health endpoint: /api/v1/platform/health
+        - path: /api/v1/platform
+          pathType: Prefix
+          portName: platform
         # Web UI → port 80 (HTTP backend, TLS at App Gateway)
         - path: /
           pathType: Prefix
@@ -607,7 +799,7 @@ SAM Pods
 - NGINX Ingress Controller installed
 - TLS certificate (cert-manager recommended)
 
-**Configuration:**
+**Recommended Configuration (Automatic Paths):**
 
 ```yaml
 service:
@@ -618,6 +810,11 @@ service:
 ingress:
   enabled: true
   className: "nginx"
+
+  # Automatic path configuration (recommended)
+  autoConfigurePaths: true
+  host: "sam.example.com"
+
   annotations:
     # NGINX-specific settings
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
@@ -629,8 +826,39 @@ ingress:
     # Cert-manager (automatic TLS)
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
 
+  # REQUIRED: TLS section triggers HTTPS URL generation
+  tls:
+    - secretName: sam-tls
+      hosts:
+        - sam.example.com
+```
+
+**Advanced Configuration (Manual Paths):**
+
+<details>
+<summary>Click to expand manual path configuration</summary>
+
+```yaml
+service:
+  type: ClusterIP
+  tls:
+    enabled: false  # NGINX handles TLS termination
+
+ingress:
+  enabled: true
+  className: "nginx"
+
+  # Manual path configuration
+  autoConfigurePaths: false
+
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
   hosts:
-    - host: sam.example.com  # Must specify host for NGINX
+    - host: sam.example.com
       paths:
         # Auth endpoints
         - path: /login
@@ -639,15 +867,16 @@ ingress:
         - path: /callback
           pathType: Prefix
           portName: auth
-        - path: /refresh_token
-          pathType: Prefix
-          portName: auth
-        - path: /user_info
+        - path: /is_token_valid
           pathType: Prefix
           portName: auth
         - path: /exchange-code
           pathType: Prefix
           portName: auth
+        # Platform service API (enterprise only)
+        - path: /api/v1/platform
+          pathType: Prefix
+          portName: platform
         # Web UI
         - path: /
           pathType: Prefix
@@ -658,6 +887,9 @@ ingress:
       hosts:
         - sam.example.com
 ```
+
+</details>
+
 
 **With cert-manager (automatic TLS):**
 
@@ -712,18 +944,143 @@ ingress:
 - Centralized TLS policy management
 - Better performance (no double encryption)
 
+### HTTPS Auto-Detection and OAuth Requirements
+
+:::danger CRITICAL for OAuth/OIDC
+When using OAuth2/OIDC authentication with Ingress, proper HTTPS configuration is **REQUIRED**. Missing TLS configuration will cause OAuth redirect URI mismatches and authentication failures.
+:::
+
+#### How the Chart Detects HTTPS
+
+The chart automatically detects whether to use `https://` or `http://` URLs based on your configuration:
+
+**For Ingress Mode** (when `ingress.enabled=true`):
+
+HTTPS is detected if **either** condition is met:
+1. **Standard Kubernetes TLS**: `ingress.tls` section has at least one entry
+2. **ALB Certificate Annotation**: `alb.ingress.kubernetes.io/certificate-arn` annotation exists
+
+**For Service Mode** (LoadBalancer/NodePort):
+
+HTTPS is detected if: `service.tls.enabled=true`
+
+#### URLs Affected by HTTPS Detection
+
+When HTTPS is detected, these environment variables use `https://` scheme:
+- `FRONTEND_SERVER_URL`
+- `PLATFORM_SERVICE_URL`
+- `OIDC_REDIRECT_URI` ← **Critical for OAuth!**
+- `EXTERNAL_AUTH_CALLBACK`
+- `EXTERNAL_AUTH_SERVICE_URL`
+- `WEBUI_FRONTEND_SERVER_URL`
+- `FRONTEND_REDIRECT_URL`
+
+#### AWS ALB Configuration (OAuth Required)
+
+```yaml
+ingress:
+  enabled: true
+  className: "alb"
+  annotations:
+    # REQUIRED for HTTPS URL generation and OAuth
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:REGION:ACCOUNT:certificate/ID
+
+    # REQUIRED for ALB subnet placement
+    alb.ingress.kubernetes.io/subnets: subnet-xxx,subnet-yyy
+```
+
+**Why certificate-arn is required**:
+- ✅ Triggers HTTPS URL generation in environment variables
+- ✅ OAuth redirect URIs use `https://` (required by most OAuth providers)
+- ✅ Prevents redirect URI mismatch errors
+
+**Without certificate-arn**:
+```yaml
+# Generated URLs will be HTTP:
+OIDC_REDIRECT_URI=http://sam.example.com/callback  ❌
+# Azure AD/OAuth provider expects:
+Configured redirect URI=https://sam.example.com/callback  ❌
+# Result: OAuth authentication fails with "redirect_uri mismatch" error
+```
+
+**With certificate-arn**:
+```yaml
+# Generated URLs will be HTTPS:
+OIDC_REDIRECT_URI=https://sam.example.com/callback  ✅
+# Matches OAuth provider configuration:
+Configured redirect URI=https://sam.example.com/callback  ✅
+# Result: OAuth authentication succeeds
+```
+
+#### NGINX Ingress Configuration (OAuth Required)
+
+```yaml
+ingress:
+  enabled: true
+  className: "nginx"
+
+  # REQUIRED: TLS section triggers HTTPS URL generation
+  tls:
+    - secretName: sam-tls  # Created by cert-manager or manually
+      hosts:
+        - sam.example.com
+```
+
+**Why tls section is required**:
+- ✅ Triggers HTTPS URL generation
+- ✅ OAuth redirect URIs use `https://`
+- ✅ cert-manager can auto-provision Let's Encrypt certificates
+
+#### Manual URL Override (Advanced)
+
+If you need to override the auto-detected URLs:
+
+```yaml
+sam:
+  frontendServerUrl: "https://custom-domain.com"  # Override frontend URL
+  platformServiceUrl: "https://custom-platform.com"  # Override platform URL
+```
+
+**Use cases**:
+- Custom domain different from ingress host
+- Local development with port-forward
+- Complex multi-ingress setups
+
 ### When Using LoadBalancer/NodePort
 
-**TLS termination happens at the Service level:**
+**TLS termination happens at the pod level.** You must provide a valid TLS certificate.
+
+#### Option 1: Use an Existing Kubernetes TLS Secret (Recommended)
+
+Create your TLS secret using your preferred method (cert-manager, external-secrets, manual, etc.):
+
+```bash
+kubectl create secret tls my-sam-tls \
+  --cert=/path/to/tls.crt \
+  --key=/path/to/tls.key \
+  -n <namespace>
+```
+
+Then reference it in your values:
 
 ```yaml
 service:
   type: LoadBalancer
   tls:
     enabled: true
-    cert: ""  # Provided via --set-file
-    key: ""   # Provided via --set-file
-    passphrase: ""
+    existingSecret: "my-sam-tls"
+
+ingress:
+  enabled: false
+```
+
+#### Option 2: Provide Certificates via --set-file
+
+```yaml
+service:
+  type: LoadBalancer
+  tls:
+    enabled: true
 
 ingress:
   enabled: false
@@ -738,10 +1095,12 @@ helm install sam ./charts/solace-agent-mesh \
   --set-file service.tls.key=/path/to/tls.key
 ```
 
-**Certificate Requirements:**
-- Publicly trusted certificate or signed by trusted CA
+#### Certificate Requirements
+
+- Publicly trusted certificate (e.g., Let's Encrypt, commercial CA)
 - Self-signed certificates are not supported
 - Must match the hostname in `sam.dnsName`
+- PEM format with full certificate chain
 
 ---
 
@@ -765,6 +1124,8 @@ helm install sam ./charts/solace-agent-mesh \
 ```yaml
 service:
   type: ClusterIP
+  tls:
+    enabled: false  # No TLS for local development
 
 ingress:
   enabled: false
@@ -772,9 +1133,13 @@ ingress:
 
 **Access:**
 ```bash
-kubectl port-forward svc/sam 8443:443
-# Visit https://localhost:8443
+# Port-forward both WebUI and Platform Service (use these specific ports for CORS)
+kubectl port-forward svc/<release-name> 8000:80 8001:8001
+
+# Visit http://localhost:8000
 ```
+
+See [Local Development with Port-Forward](#local-development-with-port-forward) for why these specific ports are required.
 
 ---
 
@@ -832,19 +1197,15 @@ service:
 ingress:
   enabled: true
   className: "alb"
+  autoConfigurePaths: true  # Automatically configures all routes
+  host: ""  # Empty for ALB
   annotations:
     alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:...
     alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
+    alb.ingress.kubernetes.io/subnets: subnet-xxx,subnet-yyy
     external-dns.alpha.kubernetes.io/hostname: sam.example.com
-  hosts:
-    - host: ""
-      paths:
-        - path: /login
-          portName: auth
-        - path: /callback
-          portName: auth
-        - path: /
-          portName: webui
 ```
 
 ---
@@ -884,7 +1245,11 @@ ingress:
           - path: /is_token_valid
             pathType: Prefix
             portName: auth
-          # Catch-all for Web UI → port 80 (HTTP, TLS at ALB)
+          # Platform service (enterprise only)
+          - path: /api/v1/platform
+            pathType: Prefix
+            portName: platform
+          # Catch-all for Web UI → port 80 (HTTP, TLS at GKE)
           - path: /
             pathType: Prefix
             portName: webui
@@ -948,7 +1313,11 @@ ingress:
           - path: /is_token_valid
             pathType: Prefix
             portName: auth
-          # Catch-all for Web UI → port 80 (HTTP, TLS at ALB)
+          # Platform service (enterprise only)
+          - path: /api/v1/platform
+            pathType: Prefix
+            portName: platform
+          # Catch-all for Web UI → port 80 (HTTP, TLS at Azure App Gateway)
           - path: /
             pathType: Prefix
             portName: webui
@@ -979,37 +1348,79 @@ service:
 ingress:
   enabled: true
   className: "nginx"
+  autoConfigurePaths: true  # Automatically configures all routes
+  host: "sam.example.com"
   annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
-  hosts:
-    - host: sam.example.com
-      paths:
-          - path: /login
-            pathType: Prefix
-            portName: auth
-          - path: /callback
-            pathType: Prefix
-            portName: auth
-          - path: /refresh_token
-            pathType: Prefix
-            portName: auth
-          - path: /user_info
-            pathType: Prefix
-            portName: auth
-          - path: /exchange-code
-            pathType: Prefix
-            portName: auth
-          - path: /is_token_valid
-            pathType: Prefix
-            portName: auth
-          # Catch-all for Web UI → port 80 (HTTP, TLS at ALB)
-          - path: /
-            pathType: Prefix
-            portName: webui
   tls:
     - secretName: sam-tls
       hosts:
         - sam.example.com
+```
+
+---
+
+## Platform Service Routing (Enterprise)
+
+SAM Enterprise includes a Platform Service API for managing agents, deployments, connectors, and toolsets.
+
+### Endpoints
+
+All platform management endpoints are under the `/api/v1/platform` path:
+
+- **Health**: `/api/v1/platform/health` - Service health check
+- **Agents**: `/api/v1/platform/agents` - Agent management
+- **Deployments**: `/api/v1/platform/deployments` - Deployment management
+- **Connectors**: `/api/v1/platform/connectors` - Connector configuration
+- **Toolsets**: `/api/v1/platform/toolsets` - Toolset management
+
+### Ingress Configuration
+
+**Important:** The `/api/v1/platform` path must be configured **before** any broader `/api` or `/api/v1` patterns in your ingress rules to ensure correct routing.
+
+```yaml
+paths:
+  # Auth paths (specific)
+  - path: /login
+    pathType: Prefix
+    portName: auth
+
+  # Platform service (enterprise only - before broader /api patterns)
+  - path: /api/v1/platform
+    pathType: Prefix
+    portName: platform
+
+  # Webui catch-all (least specific, goes last)
+  - path: /
+    pathType: Prefix
+    portName: webui
+```
+
+### Service Ports
+
+- **HTTP**: Service port `8080` → Container port `8001`
+- **HTTPS**: Service port `4443` → Container port `4443` (when service TLS enabled)
+
+### Health Checks
+
+The platform service provides its own health endpoint:
+
+```bash
+# Via ingress
+curl https://sam.example.com/api/v1/platform/health
+
+# Direct to service (within cluster)
+curl http://sam:8080/api/v1/platform/health
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "service": "Platform Service"
+}
 ```
 
 ---

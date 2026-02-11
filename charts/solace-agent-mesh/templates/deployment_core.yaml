@@ -26,6 +26,7 @@ spec:
         {{- include "sam.podAnnotations" . | nindent 8 }}
         checksum/config: {{ include (print $.Template.BasePath "/configmap_sam_config_files.yaml") . | sha256sum }}
         checksum/env: {{ include (print $.Template.BasePath "/secret_sam_env.yaml") . | sha256sum }}
+        checksum/loggingConfig: {{ include (print $.Template.BasePath "/logging-configmap.yaml") . | sha256sum }}
       labels:
         {{- include "sam.selectorLabels" . | nindent 8 }}
         {{- include "sam.podLabels" . | nindent 8 }}
@@ -70,9 +71,12 @@ spec:
 
               echo -e "SeaweedFS S3 API is ready.\n"
 
-              echo "Configuring SeaweedFS S3 credentials and bucket..."
+              echo "Configuring SeaweedFS S3 credentials and buckets..."
               echo "s3.bucket.create -name=$S3_BUCKET_NAME" | weed shell -master=$SEAWEEDFS_MASTER_ENDPOINT || exit 1
+              echo "s3.bucket.create -name=$CONNECTOR_SPEC_BUCKET_NAME" | weed shell -master=$SEAWEEDFS_MASTER_ENDPOINT || exit 1
               echo "s3.configure -apply -access_key=$S3_ACCESS_KEY -secret_key=$S3_SECRET_KEY -user=$S3_ACCESS_KEY -actions=Read,Write,List -buckets=$S3_BUCKET_NAME" | weed shell -master=$SEAWEEDFS_MASTER_ENDPOINT > /dev/null || exit 1
+              echo "s3.configure -apply -access_key=$S3_ACCESS_KEY -secret_key=$S3_SECRET_KEY -user=$S3_ACCESS_KEY -actions=Read,Write,List,Tagging,Admin -buckets=$CONNECTOR_SPEC_BUCKET_NAME" | weed shell -master=$SEAWEEDFS_MASTER_ENDPOINT > /dev/null || exit 1
+              echo "s3.configure -apply -user=anonymous -actions=Read,List -buckets=$CONNECTOR_SPEC_BUCKET_NAME" | weed shell -master=$SEAWEEDFS_MASTER_ENDPOINT > /dev/null || exit 1
 
               echo "SeaweedFS S3 setup completed successfully!"
       {{- end }}
@@ -148,70 +152,68 @@ spec:
               containerPort: 8443
             - name: webui
               containerPort: 8000
+            - name: platform
+              containerPort: 8001
+            - name: platform-tls
+              containerPort: 4443
             - name: auth
               containerPort: 5050
+            - name: health
+              containerPort: 8088
+          env:
+            - name: LOGGING_CONFIG_PATH
+              value: /app/config/logging/logging_config.yaml
+          {{- if .Values.extraSecretEnvironmentVars }}
+          {{- include "sam.extraSecretEnvironmentVars" .Values | nindent 12 }}
+          {{- end }}
           envFrom:
             - secretRef:
                 name: {{ include "sam.fullname" . }}-environment
             - secretRef:
                 name: {{ include "sam.fullname" . }}-persistence
-          # Inject specific keys from existing secrets (extraSecretEnvironmentVars)
-          {{- if .Values.extraSecretEnvironmentVars }}
-          env:
-          {{- include "sam.extraSecretEnvironmentVars" .Values | nindent 12 }}
-          {{- end }}
           command:
             - solace-agent-mesh
             - run
             - --system-env
             - /app/config/a2a_orchestrator.yaml
             - /app/config/webui_backend.yaml
+            - /app/config/platform.yaml
             {{- if .Values.sam.enterprise }}
             - /app/config/enterprise_config.yaml
             - /app/config/auth/oauth2_server.yaml
             {{- end }}
-          {{- if .Values.samDeployment.securityContext }}
           securityContext:
-            {{- toYaml .Values.samDeployment.securityContext | nindent 12 }}
+            {{- with .Values.samDeployment.securityContext }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             runAsUser: 999
             runAsGroup: 999
-          {{- end }}
+            runAsNonRoot: true
           image: "{{ .Values.samDeployment.image.repository }}:{{ .Values.samDeployment.image.tag }}"
           imagePullPolicy: {{ .Values.samDeployment.image.pullPolicy }}
           {{- if .Values.samDeployment.resources }}
           resources:
             {{- toYaml .Values.samDeployment.resources.sam | nindent 12 }}
           {{- end }}
-          # If the application is consistently unavailable for 20 seconds, it is considered unhealthy and traffic is not sent to the pod
+          startupProbe:
+            httpGet:
+              path: /startup
+              port: 8088
+            initialDelaySeconds: 25
+            periodSeconds: 5
+            failureThreshold: 30
           readinessProbe:
             httpGet:
-              path: /
-              {{- if .Values.service.tls.enabled }}
-              port: webui-tls
-              scheme: HTTPS
-              {{- else }}
-              port: webui
-              scheme: HTTP
-              {{- end }}
-            initialDelaySeconds: 30 # Give the app time to start before probing
-            successThreshold: 1
-            failureThreshold: 10
+              path: /readyz
+              port: 8088
             periodSeconds: 10
-          # If the application is consistently down for 20 seconds it is restarted
+            failureThreshold: 3
           livenessProbe:
             httpGet:
-              path: /
-              {{- if .Values.service.tls.enabled }}
-              port: webui-tls
-              scheme: HTTPS
-              {{- else }}
-              port: webui
-              scheme: HTTP
-              {{- end }}
-            initialDelaySeconds: 30 # Give the app time to start before probing
-            successThreshold: 1
-            failureThreshold: 10
+              path: /healthz
+              port: 8088
             periodSeconds: 10
+            failureThreshold: 3
           volumeMounts:
             - name: shared-storage
               mountPath: /tmp/solace-agent-mesh
@@ -220,6 +222,9 @@ spec:
               readOnly: true
             - name: tls-certs
               mountPath: /app/certs
+              readOnly: true
+            - name: logging-config-volume
+              mountPath: /app/config/logging
               readOnly: true
       {{- with .Values.samDeployment.nodeSelector }}
       nodeSelector:
@@ -234,8 +239,11 @@ spec:
           emptyDir: {}
         - name: tls-certs
           secret:
-            secretName: {{ include "sam.fullname" $ }}-tls
-            optional: true
+            secretName: {{ .Values.service.tls.existingSecret | default (printf "%s-tls" (include "sam.fullname" $)) }}
+            optional: {{ not .Values.service.tls.enabled }}
+        - name: logging-config-volume
+          configMap:
+            name: {{ include "sam.fullname" $ }}-logging-config
         - name: config-volume
           projected:
             sources:
@@ -269,3 +277,5 @@ spec:
                   name: {{ include "sam.fullname" $ }}-orchestrator-config
               - configMap:
                   name: {{ include "sam.fullname" $ }}-webui-config
+              - configMap:
+                  name: {{ include "sam.fullname" $ }}-platform-config

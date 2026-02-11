@@ -38,11 +38,21 @@ service:
 ingress:
   enabled: true
   className: "alb"
+
+  # Auto-configure paths (recommended)
+  # Automatically sets up routing for WebUI, Platform API, and Auth services
+  autoConfigurePaths: true
+
+  # Hostname (leave empty for ALB - accepts all traffic)
+  host: ""
+
   annotations:
     # SSL redirect from HTTP to HTTPS
     alb.ingress.kubernetes.io/actions.ssl-redirect: '{"Type": "redirect", "RedirectConfig":{ "Protocol": "HTTPS", "Port": "443", "StatusCode": "HTTP_301"}}'
 
-    # ACM certificate ARN (replace with your certificate)
+    # REQUIRED: ACM certificate ARN for HTTPS URL generation
+    # The chart detects HTTPS from this annotation and generates https:// URLs
+    # Critical for OAuth - without it, OAuth redirect URIs will be http:// causing authentication failures
     alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:ACCOUNT-ID:certificate/CERTIFICATE-ID
 
     # ALB configuration
@@ -50,7 +60,8 @@ ingress:
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
 
-    # Health check
+    # Health check (checks webui service for overall pod health)
+    # Note: Platform service has its own health endpoint at /api/v1/platform/health
     alb.ingress.kubernetes.io/healthcheck-path: /health
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
     alb.ingress.kubernetes.io/success-codes: "200"
@@ -58,38 +69,13 @@ ingress:
     # SSL policy
     alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS-1-2-Ext-2018-06
 
-    # Subnets for ALB (replace with your public subnets)
+    # REQUIRED: Subnets for ALB placement (replace with your public subnets)
+    # ALB needs at least 2 subnets in different availability zones
+    # These must be public subnets with internet gateway access
     alb.ingress.kubernetes.io/subnets: subnet-xxxxx,subnet-yyyyy
 
     # External DNS (optional - automatically creates Route53 DNS record)
     external-dns.alpha.kubernetes.io/hostname: sam.example.com
-
-  hosts:
-    - host: ""  # Empty for ALB (accepts all traffic)
-      paths:
-        # OAuth2 Authentication endpoints → port 5050
-        - path: /login
-          pathType: Prefix
-          portName: auth
-        - path: /callback
-          pathType: Prefix
-          portName: auth
-        - path: /refresh_token
-          pathType: Prefix
-          portName: auth
-        - path: /user_info
-          pathType: Prefix
-          portName: auth
-        - path: /exchange-code
-          pathType: Prefix
-          portName: auth
-        - path: /is_token_valid
-          pathType: Prefix
-          portName: auth
-        # Web UI (catch-all) → port 80
-        - path: /
-          pathType: Prefix
-          portName: webui
 
 # Persistence Configuration
 # Global Configuration
@@ -128,7 +114,7 @@ samDeployment:
 
   image:
     repository: gcr.io/gcp-maas-prod/solace-agent-mesh-enterprise
-    tag: v1.24.8
+    tag: 1.65.45
     pullPolicy: Always
 
   agentDeployer:

@@ -1,18 +1,25 @@
-# Solace Agent Mesh (SAM) - Minikube Local Development Configuration
-# This configuration is optimized for local development on Minikube
+# Solace Agent Mesh (SAM) - Local Kubernetes Development Configuration
+# This configuration is optimized for local development on Minikube, Kind, or Docker Desktop
 #
 # Features:
 # - No TLS (uses HTTP)
 # - No OIDC authentication (development mode)
-# - ClusterIP service (access via port-forward or minikube service)
+# - ClusterIP service (access via kubectl port-forward or minikube service)
+# - CORS configured to allow any localhost port
 # - Bundled PostgreSQL + SeaweedFS persistence
 # - Minimal resource requirements
 #
 # Usage:
-# 1. Start Minikube: minikube start
-# 2. Install: helm install agent-mesh charts/solace-agent-mesh -f samples/values/minikube-local-dev.yaml
-# 3. Access: kubectl port-forward svc/agent-mesh-solace-agent-mesh 8000:80
-# 4. Open: http://localhost:8000
+# 1. Start your local cluster: minikube start (or kind/docker-desktop)
+# 2. Install: helm install agent-mesh solace-agent-mesh/solace-agent-mesh -f local-k8s-values.yaml
+# 3. Access via port-forward:
+#      kubectl port-forward svc/agent-mesh-solace-agent-mesh 8000:80 8001:8001
+#      Open: http://localhost:8000
+#    Or via minikube service:
+#      minikube service agent-mesh-solace-agent-mesh
+#
+# Note: This config includes sam.cors.allowedOriginRegex to allow any localhost port,
+# enabling flexible port-forward and minikube service usage.
 
 # SAM Core Configuration
 sam:
@@ -33,6 +40,11 @@ sam:
       issuer: ""  # Empty issuer disables OIDC authentication
       clientId: ""
       clientSecret: ""
+
+  # Allow any localhost port for CORS (local development only)
+  # This enables port-forward with any port, not just 8000
+  cors:
+    allowedOriginRegex: "https?://(localhost|127\\.0\\.0\\.1):\\d+"
 
 # Solace Broker Configuration
 broker:
@@ -75,7 +87,7 @@ samDeployment:
   # Main SAM Image
   image:
     repository: gcr.io/gcp-maas-prod/solace-agent-mesh-enterprise
-    tag: v1.24.8
+    tag: 1.65.45
     pullPolicy: IfNotPresent  # Use IfNotPresent to avoid pulling on every restart
 
   # Agent Deployer image

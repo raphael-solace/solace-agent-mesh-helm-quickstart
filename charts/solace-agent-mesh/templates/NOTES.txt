@@ -12,10 +12,13 @@ ACCESSING SAM WEB UI
 
 Your SAM instance is accessible via Ingress:
 
-{{- $ingressHost := "" }}
-{{- range .Values.ingress.hosts }}
-  {{- if .host }}
-    {{- $ingressHost = .host }}
+{{- /* Determine external host from various sources */ -}}
+{{- $ingressHost := .Values.ingress.host }}
+{{- if not $ingressHost }}
+  {{- range .Values.ingress.hosts }}
+    {{- if .host }}
+      {{- $ingressHost = .host }}
+    {{- end }}
   {{- end }}
 {{- end }}
 {{- $externalHost := $ingressHost | default .Values.sam.dnsName }}
@@ -24,12 +27,48 @@ Your SAM instance is accessible via Ingress:
     {{- $externalHost = index .Values.ingress.annotations "external-dns.alpha.kubernetes.io/hostname" }}
   {{- end }}
 {{- end }}
-{{- $hasIngressTls := or (and .Values.ingress.tls (gt (len .Values.ingress.tls) 0)) (and .Values.ingress.annotations (hasKey .Values.ingress.annotations "alb.ingress.kubernetes.io/certificate-arn")) }}
+{{- $hasIngressTls := false }}
+{{- if and .Values.ingress.tls (gt (len .Values.ingress.tls) 0) }}
+  {{- $hasIngressTls = true }}
+{{- else if and .Values.ingress.annotations (hasKey .Values.ingress.annotations "alb.ingress.kubernetes.io/certificate-arn") }}
+  {{- $hasIngressTls = true }}
+{{- end }}
 {{- $scheme := ternary "https" "http" $hasIngressTls }}
 {{- if $externalHost }}
   URL: {{ $scheme }}://{{ $externalHost }}
 {{- else }}
   URL: <ALB DNS will be assigned - check with: kubectl get ingress {{ include "sam.fullname" . }} -n {{ .Release.Namespace }}>
+{{- end }}
+
+{{- if .Values.ingress.autoConfigurePaths }}
+✓ Path routing: Auto-configured (recommended)
+    /api/v1/platform/* → Platform Service (port 8001)
+    /login, /callback, /is_token_valid, /user_info, /refresh_token, /exchange-code → Auth Service (port 5050)
+    /* → WebUI Service (port 8000)
+{{- else }}
+Path routing: Manual (custom paths from values.yaml)
+{{- /* Validate that platform path is configured */ -}}
+{{- $hasPlatformPath := false }}
+{{- range .Values.ingress.hosts }}
+  {{- range .paths }}
+    {{- if hasPrefix "/api/v1/platform" .path }}
+      {{- $hasPlatformPath = true }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- if not $hasPlatformPath }}
+
+  ⚠️  WARNING: Platform service path (/api/v1/platform) not found in ingress configuration!
+      Platform APIs will not be accessible.
+
+      Either:
+      1. Set ingress.autoConfigurePaths: true (recommended)
+      2. Add the following path to ingress.hosts[].paths (before the catch-all / path):
+
+         - path: /api/v1/platform
+           pathType: Prefix
+           portName: platform
+{{- end }}
 {{- end }}
 
 {{- if $hasIngressTls }}
@@ -49,11 +88,13 @@ Get the external IP address:
 Once the EXTERNAL-IP is assigned, access SAM at:
 
 {{- if .Values.service.tls.enabled }}
-  Web UI:  https://<EXTERNAL-IP>
-  Auth:    https://<EXTERNAL-IP>:5050
+  Web UI:       https://<EXTERNAL-IP>
+  Platform API: https://<EXTERNAL-IP>:4443
+  Auth:         https://<EXTERNAL-IP>:5050
 {{- else }}
-  Web UI:  http://<EXTERNAL-IP>
-  Auth:    http://<EXTERNAL-IP>:5050
+  Web UI:       http://<EXTERNAL-IP>
+  Platform API: http://<EXTERNAL-IP>:8080
+  Auth:         http://<EXTERNAL-IP>:5050
 {{- end }}
 
 {{- else if eq .Values.service.type "NodePort" }}
@@ -86,13 +127,13 @@ Your SAM instance is using ClusterIP (internal only).
 To access SAM locally, use port-forward:
 
 {{- if .Values.service.tls.enabled }}
-  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "sam.fullname" . }} 8443:443
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "sam.fullname" . }} 8443:443 4443:4443
 
   Then access SAM at: https://localhost:8443
 {{- else }}
-  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "sam.fullname" . }} 8080:80
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "sam.fullname" . }} 8000:80 8080:8080
 
-  Then access SAM at: http://localhost:8080
+  Then access SAM at: http://localhost:8000
 {{- end }}
 
 For production use, consider enabling Ingress:
@@ -107,6 +148,18 @@ CONFIGURATION
 Service Type: {{ .Values.service.type }}
 {{- if .Values.service.tls.enabled }}
 Service TLS: Yes
+{{- if and (not .Values.ingress.enabled) (not .Values.service.tls.existingSecret) (not .Values.service.tls.cert) }}
+
+⚠️  WARNING: TLS is enabled but no certificate provided!
+    The pod will fail to start without a valid TLS certificate.
+
+    Either:
+    1. Set service.tls.existingSecret to reference an existing Kubernetes TLS secret
+    2. Provide certificates via --set-file:
+       --set-file service.tls.cert=/path/to/tls.crt --set-file service.tls.key=/path/to/tls.key
+
+    See: https://github.com/SolaceProducts/solace-agent-mesh-helm-quickstart/docs/network-configuration
+{{- end }}
 {{- else }}
 Service TLS: No
 {{- end }}

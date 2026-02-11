@@ -81,6 +81,16 @@ data:
           sqlite_memory_threshold_mb: 100
           max_result_preview_rows: 50
           max_result_preview_bytes: 4096
+
+    health_check:
+      enabled: true
+      port: 8088
+      liveness_path: /healthz
+      readiness_path: /readyz
+      startup_path: /startup
+      readiness_check_period_seconds: 6   # How often to check readiness
+      startup_check_period_seconds: 6    # How often to poll for startup completion
+
 {{- if .Values.sam.enterprise }}
 ---
 apiVersion: v1
@@ -264,6 +274,7 @@ data:
           ssl_certfile: ${SSL_CERTFILE}
           ssl_keyfile_password: ${SSL_KEYFILE_PASSWORD}
           cors_allowed_origins:
+            - "${FRONTEND_SERVER_URL}"
             - "http://localhost:3000"
             - "http://127.0.0.1:3000"
 
@@ -282,6 +293,7 @@ data:
                 Responses should be clear, concise, and professionally toned. 
                 Format responses to the user in Markdown using appropriate formatting.
 
+          frontend_server_url: ${FRONTEND_SERVER_URL, ""}
           frontend_welcome_message: ${FRONTEND_WELCOME_MESSAGE, "How can I assist you today?"}
           frontend_bot_name: ${FRONTEND_BOT_NAME, "Solace Agent Mesh"}
           frontend_collect_feedback: ${FRONTEND_COLLECT_FEEDBACK, false}
@@ -289,8 +301,17 @@ data:
           frontend_use_authorization: ${FRONTEND_USE_AUTHORIZATION, false}
           frontend_redirect_url: ${FRONTEND_REDIRECT_URL, ""}
           {{- if .Values.sam.enterprise }}
-          frontend_feature_enablement: { agentBuilder: true, agentBuilderEdit: true }
+          {{- $featureEnablement := .Values.sam.featureEnablement | default dict }}
+          frontend_feature_enablement:
+            agentBuilder: {{ $featureEnablement.agentBuilder | default true }}
+            agentBuilderEdit: {{ $featureEnablement.agentBuilderEdit | default true }}
+            awsBedrockEnabled: {{ $featureEnablement.awsBedrockEnabled | default true }}
+            background_tasks: {{ $featureEnablement.backgroundTasks | default true }}
           {{- end }}
+
+          # Background Tasks Configuration
+          background_tasks:
+            default_timeout_ms: ${BACKGROUND_TASKS_TIMEOUT_MS, 3600000}
 
           external_auth_callback_uri: ${EXTERNAL_AUTH_CALLBACK, http://localhost:8000/api/v1/auth/callback}
           external_auth_service_url: ${EXTERNAL_AUTH_SERVICE_URL, http://localhost:8080}
@@ -306,8 +327,86 @@ data:
             database_url: "${WEB_UI_GATEWAY_DATABASE_URL}"
             default_behavior: "PERSISTENT"
 
+          # Task logging requires SQL session storage. Either set session_service.type='sql' with a valid database_url, or disable task_logging.enabled
+          {{- $taskLogging := .Values.sam.taskLogging | default dict }}
+          {{- $hybridBuffer := $taskLogging.hybridBuffer | default dict }}
+          task_logging:
+            enabled: {{ $taskLogging.enabled | default true }}
+            log_status_updates: {{ $taskLogging.logStatusUpdates | default true }}
+            log_artifact_events: {{ $taskLogging.logArtifactEvents | default false }}
+            log_file_parts: {{ $taskLogging.logFileParts | default true }}
+            max_file_part_size_bytes: {{ $taskLogging.maxFilePartSizeBytes | default 10240 }}
+            hybrid_buffer:
+              enabled: {{ $hybridBuffer.enabled | default true }}
+              flush_threshold: {{ $hybridBuffer.flushThreshold | default 10 }}
+
+          sam_access_token:
+            enabled: ${SAM_ACCESS_TOKEN_ENABLED, false}  # Enable or disable self-managed access tokens
+            ttl_seconds: 3600
+
+          trust_manager:
+            enabled: ${TRUST_MANAGER_ENABLED, false}  # Enable or disable the trust manager
+            card_publish_interval_seconds: 10  # Publish every 10 seconds for testing
+            card_expiration_days: 7  # 1 week for development
+            verification_mode: "strict"
+            clock_skew_tolerance_seconds: 300  # 5 minutes tolerance
+            enable_time_validation: true
+            # JWT Configuration (Phase 2)
+            jwt_default_ttl_seconds: 3600  # 1 hour default JWT lifetime
+            jwt_max_ttl_seconds: 86400     # 24 hours maximum JWT lifetime
+
           platform_service:
-            database_url: "${PLATFORM_DATABASE_URL}"
+            url: ${PLATFORM_SERVICE_URL, ""}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sam.fullname" $ }}-platform-config
+  labels:
+    {{- include "sam.labels" $ | nindent 4 }}
+data:
+  platform.yaml: |
+    log:
+      stdout_log_level: INFO
+      log_file_level: DEBUG
+      log_file: platform_service.log
+
+    !include shared_config.yaml
+
+    apps:
+      - name: platform_service_app
+        app_base_path: .
+        app_module: solace_agent_mesh.services.platform.app
+
+        broker:
+          <<: *broker_connection
+
+        app_config:
+          namespace: ${NAMESPACE}
+          database_url: ${PLATFORM_DATABASE_URL}
+          fastapi_host: ${PLATFORM_API_HOST, 0.0.0.0}
+          fastapi_port: ${PLATFORM_API_PORT, 8001}
+          fastapi_https_port: ${PLATFORM_API_HTTPS_PORT, 4443}
+          ssl_keyfile: ${SSL_KEYFILE}
+          ssl_certfile: ${SSL_CERTFILE}
+          ssl_keyfile_password: ${SSL_KEYFILE_PASSWORD}
+          frontend_use_authorization: ${FRONTEND_USE_AUTHORIZATION, false}
+          external_auth_service_url: ${EXTERNAL_AUTH_SERVICE_URL}
+          external_auth_provider: ${EXTERNAL_AUTH_PROVIDER, azure}
+          max_message_size_bytes: ${MAX_MESSAGE_SIZE_BYTES, 10000000}
+          cors_allowed_origins:
+            - "${FRONTEND_SERVER_URL}"
+            - "http://localhost:3000"
+            - "http://127.0.0.1:3000"
+            - "http://localhost:8000"
+          cors_allowed_origin_regex: ${CORS_ALLOWED_ORIGIN_REGEX}
+
+          # JWT configuration (validation only - platform doesn't mint tokens)
+          sam_access_token:
+            enabled: ${SAM_ACCESS_TOKEN_ENABLED, false}
+          trust_manager:
+            enabled: ${TRUST_MANAGER_ENABLED, false}
+
 {{- if .Values.sam.enterprise }}
 ---
 apiVersion: v1
@@ -344,10 +443,10 @@ data:
         description: "Full access for SAM administrators"
         scopes:
           - "*"
-
       sam_user:
         description: "Standard user with basic access"
         scopes:
+          - "agent:*:delegate"
           - "tool:basic:read"
           - "tool:basic:search"
           - "tool:artifact:list"

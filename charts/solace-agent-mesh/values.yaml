@@ -20,6 +20,28 @@ sam:
       clientId: "oidc-client-id-here" # e.g., your-client-id
       clientSecret: "oidc-client-secret-here" # e.g., your-client-secret
 
+  # Optional URL overrides for local development (e.g., kubectl port-forward)
+  # Leave empty to use auto-computed URLs based on ingress/service configuration
+  frontendServerUrl: ""    # Override computed frontend URL
+  platformServiceUrl: ""   # Override computed platform API URL
+
+  # CORS configuration for Platform Service
+  cors:
+    # Regex pattern for additional allowed origins (uses Python re.fullmatch)
+    # Leave empty for production. For local dev, see samples/values/local-k8s-values.yaml
+    allowedOriginRegex: ""
+
+  # Task logging configuration (requires SQL session storage)
+  taskLogging:
+    enabled: true
+    logStatusUpdates: true
+    logArtifactEvents: false
+    logFileParts: true
+    maxFilePartSizeBytes: 10240
+    hybridBuffer:
+      enabled: true
+      flushThreshold: 10
+
   # User to role assignments for RBAC
   authenticationRbac:
     users:
@@ -68,17 +90,22 @@ service:
   # NodePort configuration (only used when type: NodePort)
   # Leave empty for automatic port assignment
   nodePorts:
-    http: ""      # 30000-32767
-    https: ""     # 30000-32767
-    auth: ""      # 30000-32767
+    http: ""           # 30000-32767 (WebUI HTTP)
+    https: ""          # 30000-32767 (WebUI HTTPS)
+    auth: ""           # 30000-32767 (Auth Service)
+    platformHttp: ""   # 30000-32767 (Platform API HTTP)
+    platformHttps: ""  # 30000-32767 (Platform API HTTPS)
 
-  # TLS/SSL configuration
-  # If enabled, TLS cert and key must be provided via --set-file during helm install
-  # to mount them as Kubernetes secrets
-  # The certificate must be a publicly trusted cert or a cert signed by a trusted CA
-  # Self-signed certs are not supported
+  # TLS/SSL configuration for LoadBalancer/NodePort (pod-level TLS termination)
+  # Required when using service.type: LoadBalancer or NodePort with HTTPS
+  # Not needed when using Ingress (TLS terminates at Ingress/ALB level)
   tls:
     enabled: true
+    # Option 1: Reference an existing Kubernetes TLS secret (recommended)
+    # The secret must be type kubernetes.io/tls with tls.crt and tls.key
+    existingSecret: ""
+    # Option 2: Provide cert/key inline via --set-file during helm install
+    # Example: --set-file service.tls.cert=/path/to/tls.crt --set-file service.tls.key=/path/to/tls.key
     cert: ""
     key: ""
     passphrase: ""
@@ -111,16 +138,38 @@ ingress:
     # alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
     # external-dns.alpha.kubernetes.io/hostname: sam.example.com
 
-  # Ingress hosts configuration
-  # Leave host empty for ALB/ELB ingress controllers (accepts all hostnames)
-  # Set host for name-based virtual hosting
-  hosts:
-    - host: ""  # Optional: set to sam.example.com for host-based routing
-      paths:
-        - path: /
-          pathType: Prefix
-          # Port name: webui, webui-tls, or auth
-          portName: webui-tls
+  # Automatic path configuration (recommended)
+  # When true, the chart automatically generates all required ingress paths:
+  #   - /api/v1/platform/* -> Platform Service
+  #   - /login, /callback, /is_token_valid, /exchange-code -> Auth Service
+  #   - /* -> WebUI Service
+  # This simplifies configuration and ensures correct routing on upgrades.
+  # Set to false only if you need custom path routing.
+  autoConfigurePaths: true
+
+  # Hostname for the ingress (used when autoConfigurePaths: true)
+  # Leave empty for ALB/ELB ingress controllers (accepts all hostnames)
+  # Set to your domain for name-based virtual hosting (e.g., sam.example.com)
+  host: ""
+
+  # Advanced: Manual hosts/paths configuration (only used when autoConfigurePaths: false)
+  # Most users should use autoConfigurePaths: true instead.
+  # If you need custom routing, set autoConfigurePaths: false and configure hosts below.
+  hosts: []
+    # - host: "sam.example.com"
+    #   paths:
+    #     - path: /api/v1/platform
+    #       pathType: Prefix
+    #       portName: platform
+    #     - path: /login
+    #       pathType: Prefix
+    #       portName: auth
+    #     - path: /callback
+    #       pathType: Prefix
+    #       portName: auth
+    #     - path: /
+    #       pathType: Prefix
+    #       portName: webui
 
   # TLS configuration for ingress
   tls: []
@@ -170,18 +219,20 @@ samDeployment:
   # Main SAM application container image
   image:
     repository: gcr.io/gcp-maas-prod/solace-agent-mesh-enterprise
-    tag: v1.24.8
+    tag: 1.65.45
     pullPolicy: Always
 
 
-  # Agent Deployer image (required for enterprise mode)
-  # This container is responsible for deploying and managing agents
+  # Agent/Gateway Deployer configuration (required for enterprise mode)
+  # This container is responsible for deploying and managing agents and gateways
   agentDeployer:
     image:
       repository: gcr.io/gcp-maas-prod/sam-agent-deployer
-      tag: 1.1.4
+      tag: 1.6.3
       pullPolicy: Always
-    chartUrl: "https://solaceproducts.github.io/solace-agent-mesh-helm-quickstart/sam-agent-1.1.0.tgz"
+    version: "k8s-1.0.1"
+    # Full URL to the unified Helm chart for deploying agents and gateways
+    chartUrl: "https://solaceproducts.github.io/solace-agent-mesh-helm-quickstart/sam-agent-1.2.2.tgz"
 
   # Deployment strategy and update configuration
   # use Recreate as SAM does not support multiple replicas
@@ -243,6 +294,7 @@ dataStores:
   s3:
     endpointUrl: ""
     bucketName: ""
+    connectorSpecBucketName: ""
     accessKey: ""
     secretKey: ""
 

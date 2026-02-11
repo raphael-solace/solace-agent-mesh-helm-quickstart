@@ -12,7 +12,23 @@ SAM requires persistent storage for session data and artifacts. This page covers
 SAM uses two types of persistent storage:
 
 - **PostgreSQL Database**: Stores session metadata, user data, and application state
-- **S3-Compatible Storage**: Stores artifacts, files, and other binary data
+- **S3-Compatible Storage**: Stores artifacts, files, and other binary data in two separate buckets:
+  - **Artifacts bucket**: Stores workflow artifacts and temporary files (fully private)
+  - **Connector specs bucket**: Stores OpenAPI connector specification files (public read access, authenticated write only)
+
+### S3 Bucket Configuration Details
+
+SAM requires **two separate S3 buckets** with different access requirements:
+
+| Bucket Type | Purpose | Access Requirements | Features Enabled |
+|-------------|---------|---------------------|------------------|
+| **Artifacts** | Workflow artifacts, temporary files | Fully private (authenticated read/write only) | Core workflow functionality |
+| **Connector Specs** | OpenAPI specification files | Public read, authenticated write | OpenAPI Connector feature for automatic REST API integrations |
+
+**Why two buckets?**
+- Different lifecycle and access patterns: artifacts are temporary workflow data, while connector specs are long-lived infrastructure files
+- Security isolation: agents must download connector specs at startup without authentication, but workflow artifacts must remain private
+- Critical infrastructure: agents cannot start without access to connector specification files
 
 You can choose between two persistence strategies:
 
@@ -25,6 +41,18 @@ You can choose between two persistence strategies:
 
 **Not recommended for production.** The chart can deploy single-instance PostgreSQL and SeaweedFS for quick start, demos, and proof-of-concept deployments.
 
+The bundled SeaweedFS is automatically configured with both required buckets and appropriate security:
+
+**Artifacts Bucket** (`{namespaceId}`):
+- Fully private - authenticated read/write only
+- No anonymous access
+- Stores temporary workflow artifacts
+
+**Connector Specs Bucket** (`{namespaceId}-connector-specs`):
+- Authenticated write access (SAM service only)
+- Anonymous/public read access (required for agents to download OpenAPI specifications)
+- Stores critical infrastructure files needed for agent startup
+
 ### Basic Configuration
 
 ```yaml
@@ -33,6 +61,10 @@ global:
     enabled: true
     namespaceId: "my-sam-instance"  # Must be unique per SAM installation
 ```
+
+:::tip Upgrading from ≤1.1.0?
+If you have an existing bundled persistence deployment from chart version ≤1.1.0, a one-time migration is required. See [Bundled Persistence VCT Labels](/#bundled-persistence-vct-labels-upgrading-from-110) in the Upgrading guide.
+:::
 
 ### Image Registry Configuration
 
@@ -153,6 +185,7 @@ dataStores:
   s3:
     endpointUrl: "your-s3-endpoint-url"
     bucketName: "your-bucket-name"
+    connectorSpecBucketName: "your-connector-specs-bucket-name"
     accessKey: "your-s3-access-key"
     secretKey: "your-s3-secret-key"
 ```
@@ -180,6 +213,7 @@ dataStores:
   s3:
     endpointUrl: "https://your-project-id.storage.supabase.co/storage/v1/s3"
     bucketName: "your-bucket-name"
+    connectorSpecBucketName: "your-connector-specs-bucket-name"
     accessKey: "your-supabase-s3-access-key"
     secretKey: "your-supabase-s3-secret-key"
 ```
@@ -200,6 +234,7 @@ dataStores:
   s3:
     endpointUrl: "https://s3.us-east-1.amazonaws.com"
     bucketName: "my-sam-artifacts"
+    connectorSpecBucketName: "my-sam-connector-specs"
     accessKey: "AKIAIOSFODNN7EXAMPLE"
     secretKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 ```
@@ -219,9 +254,80 @@ dataStores:
     # Configure your preferred S3-compatible storage
     endpointUrl: "https://s3.amazonaws.com"
     bucketName: "my-sam-artifacts"
+    connectorSpecBucketName: "my-sam-connector-specs"
     accessKey: "your-access-key"
     secretKey: "your-secret-key"
 ```
+
+### AWS S3 Bucket Setup and Policy Requirements
+
+When using external AWS S3, you must create **both buckets** before deploying SAM.
+
+**Create the buckets:**
+
+```bash
+# Create artifacts bucket (private)
+aws s3 mb s3://your-bucket-name --region us-east-1
+
+# Create connector specs bucket (will configure public read next)
+aws s3 mb s3://your-connector-specs-bucket-name --region us-east-1
+```
+
+#### Connector Specs Bucket: Public Read Policy
+
+The connector specs bucket **requires public read access** so agents can download OpenAPI specification files during startup without authentication. This is a critical security requirement that enables the OpenAPI Connector feature.
+
+**Why public read access?**
+- Agents need to download connector specification files immediately at startup
+- Authentication credentials are not available to agents until after startup completes
+- These files contain API schemas and endpoints but no sensitive data (credentials, keys, etc.)
+- Write access remains restricted to the SAM service only (using S3 access keys)
+
+**Security considerations:**
+- **Safe to make public**: Connector specification files contain only API schemas, endpoints, and data models
+- **No credentials**: Never store API keys, passwords, or secrets in connector specifications
+- **Write protection**: Only the SAM service (with S3 credentials) can upload/modify files
+- **Review specs before upload**: Ensure connector specs don't contain internal URLs or sensitive metadata you don't want public
+
+**Apply public read policy:**
+
+Save this policy as `connector-specs-policy.json`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "PublicReadGetObject",
+    "Effect": "Allow",
+    "Principal": "*",
+    "Action": "s3:GetObject",
+    "Resource": "arn:aws:s3:::your-connector-specs-bucket-name/*"
+  }]
+}
+```
+
+Apply the policy:
+
+```bash
+aws s3api put-bucket-policy \
+  --bucket your-connector-specs-bucket-name \
+  --policy file://connector-specs-policy.json
+```
+
+#### Important Security Notes
+
+**Artifacts bucket (private):**
+- Should remain **fully private** (default AWS S3 behavior)
+- No public access policy needed
+- Contains workflow artifacts and temporary files
+- Only accessible with S3 credentials
+
+**Connector specs bucket (public read):**
+- Needs **public read** access (anonymous GetObject)
+- **Private write** access (only SAM service with credentials can upload)
+- Contains OpenAPI specification files for REST API integrations
+- Enables the OpenAPI Connector feature
+- Replace `your-connector-specs-bucket-name` in the policy with your actual bucket name
 
 ## Troubleshooting
 

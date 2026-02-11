@@ -163,6 +163,17 @@ Get S3 secret key (same as namespaceId)
 {{- end }}
 
 {{/*
+Get S3 connector specs bucket name
+*/}}
+{{- define "sam.s3.connectorSpecBucketName" -}}
+{{- if .Values.global.persistence.enabled }}
+{{- printf "%s-connector-specs" .Values.global.persistence.namespaceId }}
+{{- else -}}
+{{- printf "%s" .Values.dataStores.s3.connectorSpecBucketName }}
+{{- end }}
+{{- end }}
+
+{{/*
 Database configuration helpers - generates consistent database settings based on namespaceId
 */}}
 
@@ -257,4 +268,49 @@ Get Platform database password
 {{- else }}
 {{- required "dataStores.database.applicationPassword is required for external persistence" .Values.dataStores.database.applicationPassword }}
 {{- end }}
+{{- end }}
+
+{{/*
+Health check script for liveness and readiness probes.
+Checks both WebUI and Platform service ports are listening.
+*/}}
+{{- define "sam.healthCheckScript" -}}
+import socket
+try:
+    {{- if .Values.service.tls.enabled }}
+    sock_webui = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock_webui.settimeout(5)
+    result_webui = sock_webui.connect_ex(('localhost', 8443))
+    sock_webui.close()
+
+    sock_platform = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock_platform.settimeout(5)
+    result_platform = sock_platform.connect_ex(('localhost', 4443))
+    sock_platform.close()
+
+    if result_webui == 0 and result_platform == 0:
+        exit(0)
+    else:
+        print(f"Port 8443: {result_webui}, Port 4443: {result_platform}")
+        exit(1)
+    {{- else }}
+    sock_webui = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock_webui.settimeout(5)
+    result_webui = sock_webui.connect_ex(('localhost', 8000))
+    sock_webui.close()
+
+    sock_platform = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock_platform.settimeout(5)
+    result_platform = sock_platform.connect_ex(('localhost', 8001))
+    sock_platform.close()
+
+    if result_webui == 0 and result_platform == 0:
+        exit(0)
+    else:
+        print(f"Port 8000: {result_webui}, Port 8001: {result_platform}")
+        exit(1)
+    {{- end }}
+except Exception as e:
+    print(f"Health check failed: {e}")
+    exit(1)
 {{- end }}
