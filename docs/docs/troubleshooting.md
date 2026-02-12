@@ -7,6 +7,8 @@ title: Troubleshooting
 
 This guide provides solutions for common issues when deploying and running Solace Agent Mesh (SAM).
 
+For a tested local workflow using private registry credentials, namespace scoping, and port-forward access, see [Local Minikube Runbook](local-minikube-runbook).
+
 ## Diagnostic Commands
 
 **Note:** The commands below use `app.kubernetes.io/instance=agent-mesh` where `agent-mesh` is the Helm release name. Replace `agent-mesh` with your actual release name if different.

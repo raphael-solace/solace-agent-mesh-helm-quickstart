@@ -37,10 +37,16 @@ spec:
       securityContext:
         {{- toYaml .Values.samDeployment.podSecurityContext | nindent 8 }}
       {{- end }}
+      {{- $persistenceLayerValues := index .Values "persistence-layer" | default dict }}
+      {{- $seaweedfsValues := index $persistenceLayerValues "seaweedfs" | default dict }}
+      {{- $seaweedfsImageValues := index $seaweedfsValues "image" | default dict }}
+      {{- $seaweedfsImageRegistry := index $seaweedfsImageValues "registry" | default .Values.global.imageRegistry }}
+      {{- $seaweedfsImageRepository := index $seaweedfsImageValues "repository" | default "chrislusf/seaweedfs" }}
+      {{- $seaweedfsImageTag := index $seaweedfsImageValues "tag" | default "3.97" }}
       initContainers:
       {{-  if .Values.global.persistence.enabled }}
         - name: s3-init
-          image: "{{- if .Values.global.imageRegistry }}{{ .Values.global.imageRegistry }}/{{ end }}chrislusf/seaweedfs:3.97"
+          image: "{{- if $seaweedfsImageRegistry }}{{ $seaweedfsImageRegistry }}/{{ end }}{{ $seaweedfsImageRepository }}:{{ $seaweedfsImageTag }}"
           envFrom:
             - secretRef:
                 name: {{ include "seaweedfs.secretName" (index .Subcharts "persistence-layer") }}
@@ -64,7 +70,7 @@ spec:
               echo -e "SeaweedFS master is ready.\n"
 
               echo "Waiting for SeaweedFS S3 API to be ready..."
-              until wget --timeout=3 --tries=1 --spider -qO- $SEAWEEDFS_S3_ENDPOINT_STATUS_URL >/dev/null; do
+              until wget --timeout=3 --tries=1 -qO- $SEAWEEDFS_S3_ENDPOINT_STATUS_URL >/dev/null; do
                 echo "S3 API not ready yet..."
                 sleep 5
               done

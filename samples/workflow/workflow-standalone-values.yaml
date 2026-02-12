@@ -1,0 +1,52 @@
+# Standalone workflow deployment values for SAM Agent chart
+# Use with:
+# helm upgrade --install sam-prescriptive-ops-workflow charts/solace-agent-mesh-agent \
+#   -n rafa-demos \
+#   -f samples/workflow/workflow-standalone-values.yaml \
+#   --set-file config.yaml=samples/workflow/prescriptive-ops-workflow.yaml \
+#   --set solaceBroker.url=... --set solaceBroker.username=... --set solaceBroker.password=... --set solaceBroker.vpn=... \
+#   --set llmService.generalModelName=... --set llmService.endpoint=... --set llmService.apiKey=...
+
+deploymentMode: "deployer"
+component: "agent"
+id: "sam-prescriptive-ops-workflow"
+
+# Must match the persistence namespace ID used by your SAM core deployment.
+# In this environment it is "solace-agent-mesh-no-auth".
+global:
+  persistence:
+    namespaceId: "solace-agent-mesh-no-auth"
+
+serviceAccount:
+  name: solace-agent-mesh-sa
+
+imagePullSecret: gcr-reg-secret
+image:
+  repository: gcr.io/gcp-maas-prod/solace-agent-mesh-enterprise
+  tag: 1.65.45
+  pullPolicy: Always
+
+rollout:
+  strategy: Recreate
+
+# These values are intentionally placeholders and should be provided at install/upgrade time.
+solaceBroker:
+  url: "wss://replace-me:443"
+  username: "replace-me"
+  password: "replace-me"
+  vpn: "replace-me"
+  useTemporaryQueues: false
+
+llmService:
+  generalModelName: "replace-me"
+  endpoint: "https://replace-me"
+  apiKey: "replace-me"
+
+resources:
+  sam:
+    requests:
+      cpu: 500m
+      memory: 768Mi
+    limits:
+      cpu: 1500m
+      memory: 1536Mi

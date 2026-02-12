@@ -14,6 +14,11 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'doc',
+      id: 'local-minikube-runbook',
+      label: 'Local Minikube Runbook',
+    },
+    {
+      type: 'doc',
       id: 'network-configuration',
       label: 'Network Configuration',
     },
@@ -26,6 +31,11 @@ const sidebars: SidebarsConfig = {
       type: 'doc',
       id: 'standalone-agent-deployment',
       label: 'Standalone Agent Deployment',
+    },
+    {
+      type: 'doc',
+      id: 'administration-guide',
+      label: 'Administration Guide',
     },
     {
       type: 'doc',

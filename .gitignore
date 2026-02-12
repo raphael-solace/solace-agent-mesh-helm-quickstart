@@ -1,0 +1,7 @@
+# macOS
+.DS_Store
+
+# Local deployment overrides and credentials
+custom-values.yaml
+pull-secret.yaml
+*-pull-secret.yaml

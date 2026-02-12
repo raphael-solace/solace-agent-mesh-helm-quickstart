@@ -1,0 +1,155 @@
+log:
+  stdout_log_level: INFO
+  log_file_level: DEBUG
+  log_file: "prescriptive_ops_workflow.log"
+
+apps:
+  - name: "prescriptive_ops_workflow"
+    app_base_path: "."
+    app_module: "solace_agent_mesh.workflow.app"
+    broker:
+      dev_mode: ${SOLACE_DEV_MODE, false}
+      broker_url: ${SOLACE_BROKER_URL, ws://localhost:8080}
+      broker_username: ${SOLACE_BROKER_USERNAME, default}
+      broker_password: ${SOLACE_BROKER_PASSWORD, default}
+      broker_vpn: ${SOLACE_BROKER_VPN, default}
+      temporary_queue: ${USE_TEMPORARY_QUEUES, true}
+
+    app_config:
+      namespace: "${NAMESPACE}"
+      name: "SAM Prescriptive Operations Workflow"
+      description: "Structured incident triage and remediation planning workflow for Solace Agent Mesh operations."
+      style: "workflow"
+
+      model:
+        model: "${LLM_SERVICE_GENERAL_MODEL_NAME}"
+        api_base: "${LLM_SERVICE_ENDPOINT}"
+        api_key: "${LLM_SERVICE_API_KEY}"
+
+      session_service:
+        type: ${PERSISTENCE_TYPE, sql}
+        database_url: ${DATABASE_URL, sqlite:///prescriptive_ops_workflow.db}
+        default_behavior: PERSISTENT
+
+      artifact_service:
+        type: ${ARTIFACT_SERVICE_TYPE, s3}
+        bucket_name: ${S3_BUCKET_NAME}
+        endpoint_url: ${S3_ENDPOINT_URL}
+        aws_region: ${AWS_REGION, us-east-1}
+        artifact_scope: namespace
+
+      workflow:
+        version: "1.0.0"
+        description: "Prescriptive incident handling workflow with triage, diagnostics, remediation planning, and verification."
+        input_schema:
+          type: object
+          properties:
+            incident_summary:
+              type: string
+              description: "Short description of the incident."
+            priority:
+              type: string
+              enum: ["P1", "P2", "P3", "P4"]
+              description: "Incident severity."
+            context:
+              type: object
+              description: "Optional structured context like namespace, service, recent changes, and logs."
+              additionalProperties: true
+          required: ["incident_summary", "priority"]
+
+        nodes:
+          - id: "triage"
+            type: "agent"
+            agent_name: "Agent 1"
+            input:
+              incident_summary: "{{workflow.input.incident_summary}}"
+              priority: "{{workflow.input.priority}}"
+              context: "{{workflow.input.context}}"
+              instruction: |
+                Perform incident triage for SAM operations.
+                Classify likely category (image-pull, configuration, connectivity, persistence, permissions, runtime).
+                Return:
+                1. category
+                2. likely blast radius
+                3. immediate containment actions
+                4. confidence level
+
+          - id: "diagnostics"
+            type: "agent"
+            agent_name: "Agent 1"
+            depends_on: ["triage"]
+            input:
+              triage_result: "{{triage.output}}"
+              incident_summary: "{{workflow.input.incident_summary}}"
+              priority: "{{workflow.input.priority}}"
+              instruction: |
+                Build a diagnostics checklist for the triaged incident.
+                Include exact kubectl/helm checks in priority order and expected healthy vs unhealthy signals.
+                Keep output concise and executable.
+
+          - id: "remediation_plan"
+            type: "agent"
+            agent_name: "Agent 1"
+            depends_on: ["diagnostics"]
+            input:
+              triage_result: "{{triage.output}}"
+              diagnostics_result: "{{diagnostics.output}}"
+              priority: "{{workflow.input.priority}}"
+              instruction: |
+                Create a remediation plan with:
+                - ordered actions
+                - rollback checkpoint after each risky action
+                - validation criteria after each step
+                - escalation trigger if criteria fail
+
+          - id: "verification"
+            type: "agent"
+            agent_name: "Agent 1"
+            depends_on: ["remediation_plan"]
+            input:
+              remediation_plan: "{{remediation_plan.output}}"
+              context: "{{workflow.input.context}}"
+              instruction: |
+                Produce post-remediation verification checks for platform health,
+                including pod readiness, API endpoint checks, and persistence connectivity.
+                Include a short watch window recommendation.
+
+          - id: "final_report"
+            type: "agent"
+            agent_name: "Agent 1"
+            depends_on: ["verification"]
+            input:
+              triage_result: "{{triage.output}}"
+              diagnostics_result: "{{diagnostics.output}}"
+              remediation_plan: "{{remediation_plan.output}}"
+              verification_result: "{{verification.output}}"
+              instruction: |
+                Create the final incident report in markdown with sections:
+                - Situation Summary
+                - Root Cause Hypothesis
+                - Diagnostics Performed
+                - Remediation Actions
+                - Verification Results
+                - Follow-ups (prevention)
+
+        output_mapping:
+          summary: "{{final_report.output}}"
+          triage: "{{triage.output}}"
+          diagnostics: "{{diagnostics.output}}"
+          remediation: "{{remediation_plan.output}}"
+          verification: "{{verification.output}}"
+
+      agent_card:
+        description: "Prescriptive workflow for SAM incident triage and remediation planning."
+        defaultInputModes: ["text"]
+        defaultOutputModes: ["text"]
+        skills:
+          - id: "operations_incident_response"
+            name: "Operations Incident Response"
+            description: "Runs a structured workflow and returns actionable incident guidance."
+
+      agent_card_publishing:
+        interval_seconds: 30
+
+      agent_discovery:
+        enabled: false
