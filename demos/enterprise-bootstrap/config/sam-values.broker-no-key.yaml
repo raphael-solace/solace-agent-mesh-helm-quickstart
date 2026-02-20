@@ -1,0 +1,57 @@
+sam:
+  enterprise: true
+  authorization:
+    enabled: false
+  dnsName: "127.0.0.1"
+  frontendServerUrl: "http://127.0.0.1:8000"
+  platformServiceUrl: "http://127.0.0.1:8080"
+  cors:
+    allowedOriginRegex: "https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?"
+
+broker:
+  url: "wss://replace-with-your-broker.messaging.solace.cloud:443"
+  clientUsername: "replace-with-broker-client-username"
+  password: "replace-with-broker-password"
+  vpn: "replace-with-broker-vpn"
+
+llmService:
+  planningModel: "openai/gpt-4.1-mini"
+  generalModel: "openai/gpt-4.1-mini"
+  reportModel: "openai/gpt-4.1-mini"
+  imageModel: "openai/gpt-4.1-mini"
+  transcriptionModel: "whisper-1"
+  llmServiceEndpoint: "https://replace-with-your-litellm-endpoint"
+  llmServiceApiKey: ""
+
+service:
+  type: LoadBalancer
+  annotations: {}
+  tls:
+    enabled: false
+    passphrase: ""
+
+global:
+  imageRegistry: gcr.io/gcp-maas-prod
+  persistence:
+    enabled: true
+    namespaceId: "sam-enterprise-demo"
+
+persistence-layer:
+  postgresql:
+    image:
+      tag: "18.0-trixie"
+  seaweedfs:
+    image:
+      tag: "3.97-compliant"
+
+samDeployment:
+  imagePullSecret: gcr-reg-secret
+  image:
+    repository: gcr.io/gcp-maas-prod/solace-agent-mesh-enterprise
+    tag: 1.65.45
+    pullPolicy: Always
+  agentDeployer:
+    image:
+      repository: gcr.io/gcp-maas-prod/sam-agent-deployer
+      tag: 1.6.3
+      pullPolicy: Always

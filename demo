@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUNDLE_DIR="${ROOT_DIR}/demos/enterprise-bootstrap"
+
+usage() {
+  cat <<'EOF'
+Usage: ./demo <up|down> [args]
+
+Commands:
+  up     Bootstrap and start the enterprise demo (prompts for LiteLLM key)
+  down   Stop local SAM access (delegates to scripts/sam-stop.sh)
+EOF
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  up)
+    shift
+    exec "${BUNDLE_DIR}/demo-up.sh" "$@"
+    ;;
+  down)
+    shift
+    exec "${BUNDLE_DIR}/demo-down.sh" "$@"
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac

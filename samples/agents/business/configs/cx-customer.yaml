@@ -1,0 +1,83 @@
+log:
+  stdout_log_level: INFO
+  log_file_level: DEBUG
+  log_file: "cx_customer_agent.log"
+
+apps:
+  - name: "cx_customer_agent"
+    app_base_path: "."
+    app_module: "solace_agent_mesh.agent.sac.app"
+    broker:
+      dev_mode: ${SOLACE_DEV_MODE, false}
+      broker_url: ${SOLACE_BROKER_URL, ws://localhost:8080}
+      broker_username: ${SOLACE_BROKER_USERNAME, default}
+      broker_password: ${SOLACE_BROKER_PASSWORD, default}
+      broker_vpn: ${SOLACE_BROKER_VPN, default}
+      temporary_queue: ${USE_TEMPORARY_QUEUES, true}
+
+    app_config:
+      namespace: "${NAMESPACE}"
+      supports_streaming: true
+      agent_name: "Customer Experience Agent"
+      display_name: "Customer Experience Agent"
+      instruction: |
+        You are Customer Experience Agent.
+        Primary enterprise system: Zendesk.
+
+        Core responsibilities:
+        - Classify incoming tickets by intent, urgency, and customer tier.
+        - Route tickets using SLA, entitlement, and team ownership rules.
+        - Draft suggested responses using known issue context and tone guidance.
+        - Escalate high-risk cases to operations or legal with structured context.
+
+        Operating rules:
+        - Use connected enterprise tools and uploaded artifacts first.
+        - If the required Zendesk connector is unavailable, explicitly state the missing integration and proceed with user-provided data only.
+        - Do not fabricate records, KPIs, IDs, approvals, or outcomes.
+        - Return actionable outputs with owners, due dates, assumptions, and risk level.
+
+      model:
+        model: "${LLM_SERVICE_GENERAL_MODEL_NAME}"
+        api_base: "${LLM_SERVICE_ENDPOINT}"
+        api_key: "${LLM_SERVICE_API_KEY}"
+
+      tools:
+        - tool_type: builtin-group
+          group_name: "data_analysis"
+        - tool_type: builtin-group
+          group_name: "web"
+
+      session_service:
+        type: ${PERSISTENCE_TYPE, sql}
+        database_url: ${DATABASE_URL, sqlite:///cx_customer_agent.db}
+        default_behavior: PERSISTENT
+
+      artifact_service:
+        type: ${ARTIFACT_SERVICE_TYPE, s3}
+        bucket_name: ${S3_BUCKET_NAME}
+        endpoint_url: ${S3_ENDPOINT_URL}
+        aws_region: ${AWS_REGION, us-east-1}
+        artifact_scope: namespace
+
+      artifact_handling_mode: reference
+      enable_embed_resolution: true
+      enable_artifact_content_instruction: true
+
+      agent_card:
+        description: "Improves support operations with SLA-aware routing and escalation control."
+        defaultInputModes: ["text", "file"]
+        defaultOutputModes: ["text", "file"]
+        skills:
+          - id: "customer_support_orchestration"
+            name: "Customer Support Orchestration"
+            description: "Improves support operations with SLA-aware routing and escalation control."
+
+      agent_card_publishing:
+        interval_seconds: 15
+
+      agent_discovery:
+        enabled: false
+
+      inter_agent_communication:
+        allow_list: []
+        request_timeout_seconds: 30

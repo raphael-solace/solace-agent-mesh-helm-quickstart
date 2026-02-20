@@ -1,0 +1,83 @@
+log:
+  stdout_log_level: INFO
+  log_file_level: DEBUG
+  log_file: "fin_finance_agent.log"
+
+apps:
+  - name: "fin_finance_agent"
+    app_base_path: "."
+    app_module: "solace_agent_mesh.agent.sac.app"
+    broker:
+      dev_mode: ${SOLACE_DEV_MODE, false}
+      broker_url: ${SOLACE_BROKER_URL, ws://localhost:8080}
+      broker_username: ${SOLACE_BROKER_USERNAME, default}
+      broker_password: ${SOLACE_BROKER_PASSWORD, default}
+      broker_vpn: ${SOLACE_BROKER_VPN, default}
+      temporary_queue: ${USE_TEMPORARY_QUEUES, true}
+
+    app_config:
+      namespace: "${NAMESPACE}"
+      supports_streaming: true
+      agent_name: "Finance Agent"
+      display_name: "Finance Agent"
+      instruction: |
+        You are Finance Agent.
+        Primary enterprise system: SAP.
+
+        Core responsibilities:
+        - Coordinate month-end close tasks with owners, dependencies, and deadlines.
+        - Categorize spend patterns and detect policy or budget anomalies.
+        - Compare budget versus actuals and isolate main variance drivers.
+        - Identify forecast deltas early and issue actionable alerts.
+
+        Operating rules:
+        - Use connected enterprise tools and uploaded artifacts first.
+        - If the required SAP connector is unavailable, explicitly state the missing integration and proceed with user-provided data only.
+        - Do not fabricate records, KPIs, IDs, approvals, or outcomes.
+        - Return actionable outputs with owners, due dates, assumptions, and risk level.
+
+      model:
+        model: "${LLM_SERVICE_GENERAL_MODEL_NAME}"
+        api_base: "${LLM_SERVICE_ENDPOINT}"
+        api_key: "${LLM_SERVICE_API_KEY}"
+
+      tools:
+        - tool_type: builtin-group
+          group_name: "data_analysis"
+        - tool_type: builtin-group
+          group_name: "web"
+
+      session_service:
+        type: ${PERSISTENCE_TYPE, sql}
+        database_url: ${DATABASE_URL, sqlite:///fin_finance_agent.db}
+        default_behavior: PERSISTENT
+
+      artifact_service:
+        type: ${ARTIFACT_SERVICE_TYPE, s3}
+        bucket_name: ${S3_BUCKET_NAME}
+        endpoint_url: ${S3_ENDPOINT_URL}
+        aws_region: ${AWS_REGION, us-east-1}
+        artifact_scope: namespace
+
+      artifact_handling_mode: reference
+      enable_embed_resolution: true
+      enable_artifact_content_instruction: true
+
+      agent_card:
+        description: "Supports close, spend governance, and forward-looking finance controls."
+        defaultInputModes: ["text", "file"]
+        defaultOutputModes: ["text", "file"]
+        skills:
+          - id: "finance_operations"
+            name: "Finance Operations"
+            description: "Supports close, spend governance, and forward-looking finance controls."
+
+      agent_card_publishing:
+        interval_seconds: 15
+
+      agent_discovery:
+        enabled: false
+
+      inter_agent_communication:
+        allow_list: []
+        request_timeout_seconds: 30

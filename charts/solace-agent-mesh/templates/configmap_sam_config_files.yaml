@@ -277,6 +277,8 @@ data:
             - "${FRONTEND_SERVER_URL}"
             - "http://localhost:3000"
             - "http://127.0.0.1:3000"
+            - "http://localhost:8000"
+            - "http://127.0.0.1:8000"
 
           enable_embed_resolution: ${ENABLE_EMBED_RESOLUTION, true}
           gateway_artifact_content_limit_bytes: ${GATEWAY_ARTIFACT_LIMIT_BYTES, 10000000}

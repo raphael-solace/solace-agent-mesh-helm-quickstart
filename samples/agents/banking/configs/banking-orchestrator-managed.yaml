@@ -1,0 +1,84 @@
+log:
+  stdout_log_level: INFO
+  log_file_level: DEBUG
+  log_file: "agent_019c7013_bf70_7390_a123_f693d93b5e1c.log"
+
+apps:
+  - name: "agent_019c7013_bf70_7390_a123_f693d93b5e1c"
+    app_base_path: "."
+    app_module: "solace_agent_mesh.agent.sac.app"
+    broker:
+      dev_mode: ${SOLACE_DEV_MODE, false}
+      broker_url: ${SOLACE_BROKER_URL, ws://localhost:8080}
+      broker_username: ${SOLACE_BROKER_USERNAME, default}
+      broker_password: ${SOLACE_BROKER_PASSWORD, default}
+      broker_vpn: ${SOLACE_BROKER_VPN, default}
+      temporary_queue: ${USE_TEMPORARY_QUEUES, true}
+    app_config:
+      namespace: "${NAMESPACE}"
+      supports_streaming: true
+      agent_name: "agent_019c7013_bf70_7390_a123_f693d93b5e1c"
+      display_name: "Banking Orchestrator Agent"
+      deployment:
+        id: "019c7014-bb16-70a1-825e-ab6b4e86e0d6"
+      instruction: |
+        You are Banking Orchestrator Agent.
+        Your role is to coordinate a four-agent banking team and return one integrated result.
+
+        Managed agents:
+        - Data Collector: agent_019c7013_df75_7db1_b14f_176a09f598bd
+        - LLM Analysis Agent: agent_019c7014_0041_7b80_a037_5488f0d835a1
+        - Risk & Compliance: agent_019c7014_232d_7883_a0ca_f235f1f491f3
+        - ESG Channel Agent: agent_019c7014_7693_7e02_a58a_2b1f23f30e0c
+
+        Operating protocol:
+        1. Parse user goal and build a short execution plan.
+        2. Delegate collection tasks to Data Collector first.
+        3. Delegate analysis tasks to LLM Analysis Agent.
+        4. Delegate controls, policy, and exposure checks to Risk & Compliance.
+        5. Delegate ESG channel strategy and narrative outputs to ESG Channel Agent.
+        6. Reconcile outputs, resolve inconsistencies, and return one final response.
+
+        Rules:
+        - Do not fabricate subordinate outputs.
+        - If an agent call fails or times out, report it explicitly and continue with partial results.
+        - Always include assumptions, confidence, and concrete next actions.
+      model:
+        model: "${LLM_SERVICE_GENERAL_MODEL_NAME}"
+        api_base: "${LLM_SERVICE_ENDPOINT}"
+        api_key: "${LLM_SERVICE_API_KEY}"
+      tools:
+        - tool_type: builtin-group
+          group_name: "data_analysis"
+      session_service:
+        type: ${PERSISTENCE_TYPE, sql}
+        database_url: ${DATABASE_URL, sqlite:///agent_019c7013_bf70_7390_a123_f693d93b5e1c.db}
+        default_behavior: PERSISTENT
+      artifact_service:
+        type: ${ARTIFACT_SERVICE_TYPE, s3}
+        bucket_name: ${S3_BUCKET_NAME}
+        endpoint_url: ${S3_ENDPOINT_URL}
+        aws_region: ${AWS_REGION, us-east-1}
+        artifact_scope: namespace
+      artifact_handling_mode: reference
+      enable_embed_resolution: true
+      enable_artifact_content_instruction: true
+      agent_card:
+        description: "Banking orchestrator that coordinates Data Collector, LLM Analysis, Risk & Compliance, and ESG Channel agents."
+        defaultInputModes: ["file", "text"]
+        defaultOutputModes: ["file", "text"]
+        skills:
+          - id: "banking_orchestration"
+            name: "Banking Team Orchestration"
+            description: "Plans and coordinates multi-agent execution across the banking demo team."
+      agent_card_publishing:
+        interval_seconds: 10
+      agent_discovery:
+        enabled: true
+      inter_agent_communication:
+        allow_list:
+          - "agent_019c7013_df75_7db1_b14f_176a09f598bd" # Data Collector
+          - "agent_019c7014_0041_7b80_a037_5488f0d835a1" # LLM Analysis Agent
+          - "agent_019c7014_232d_7883_a0ca_f235f1f491f3" # Risk & Compliance
+          - "agent_019c7014_7693_7e02_a58a_2b1f23f30e0c" # ESG Channel Agent
+        request_timeout_seconds: 120

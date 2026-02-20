@@ -171,13 +171,36 @@ Typical causes:
 - Wrong frontend/platform URLs (`sam.example.com`) in runtime env
 - Missing platform port-forward (`8080`)
 - Stale frontend tab using old config
+- CORS origin not allowed (`CORS_ALLOWED_ORIGIN_REGEX` empty or too strict)
+- Local helper script bug (if `rg` is not installed, old `sam-start.sh` failed readiness checks)
+- Transient startup window while `agent-mesh-core` and `agent-mesh-postgresql` roll (DB connection refused in core logs)
+
+Exact failure signatures observed:
+
+- Browser toast: `Error loading agents. Failed to fetch`
+- API from UI origin fails CORS header check:
+  - missing `access-control-allow-origin` for local origin
+- Core logs during startup:
+  - `psycopg2.OperationalError ... connection refused ... agent-mesh-postgresql:5432`
+- Old local script failure:
+  - `/scripts/sam-start.sh: line XX: rg: command not found`
 
 Fix:
 
-1. Ensure local overrides are set in `custom-values.yaml`
-2. `helm upgrade ... -f custom-values.yaml`
-3. Restart port-forward with all required ports
-4. Hard refresh browser tab
+1. Ensure local overrides are set in `custom-values.yaml`:
+   - `sam.frontendServerUrl: http://127.0.0.1:8000`
+   - `sam.platformServiceUrl: http://127.0.0.1:8080`
+   - `sam.cors.allowedOriginRegex: "https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?"`
+2. Apply values:
+   - `helm upgrade --install agent-mesh charts/solace-agent-mesh -n rafa-demos -f custom-values.yaml`
+3. Use fixed helper scripts from this repo:
+   - `scripts/sam-start.sh`
+   - `scripts/sam-stop.sh`
+4. Validate before opening UI:
+   - `curl -i http://127.0.0.1:8080/api/v1/platform/agents`
+   - `curl -i -H "Origin: http://127.0.0.1:8000" http://127.0.0.1:8080/api/v1/platform/agents`
+5. Hard refresh browser tab (`Cmd+Shift+R`) and open only:
+   - `http://127.0.0.1:8000`
 
 ## 8. Useful Day-2 Commands
 
@@ -197,4 +220,3 @@ kubectl describe pod -n rafa-demos <pod-name>
 ## 9. Security Note
 
 Do not commit real credentials (broker password, LLM API key, docker auth json) into shared repositories. Rotate any credentials that were used in local testing.
-

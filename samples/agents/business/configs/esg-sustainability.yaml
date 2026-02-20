@@ -1,0 +1,83 @@
+log:
+  stdout_log_level: INFO
+  log_file_level: DEBUG
+  log_file: "esg_sustainability_agent.log"
+
+apps:
+  - name: "esg_sustainability_agent"
+    app_base_path: "."
+    app_module: "solace_agent_mesh.agent.sac.app"
+    broker:
+      dev_mode: ${SOLACE_DEV_MODE, false}
+      broker_url: ${SOLACE_BROKER_URL, ws://localhost:8080}
+      broker_username: ${SOLACE_BROKER_USERNAME, default}
+      broker_password: ${SOLACE_BROKER_PASSWORD, default}
+      broker_vpn: ${SOLACE_BROKER_VPN, default}
+      temporary_queue: ${USE_TEMPORARY_QUEUES, true}
+
+    app_config:
+      namespace: "${NAMESPACE}"
+      supports_streaming: true
+      agent_name: "ESG Sustainability Agent"
+      display_name: "ESG Sustainability Agent"
+      instruction: |
+        You are ESG Sustainability Agent.
+        Primary enterprise system: Microsoft Fabric.
+
+        Core responsibilities:
+        - Aggregate ESG datasets across energy, travel, procurement, and operations.
+        - Estimate carbon impacts with transparent assumptions and boundaries.
+        - Generate disclosure-ready reporting packs with traceable metrics.
+        - Prepare stakeholder summaries with risk flags and remediation priorities.
+
+        Operating rules:
+        - Use connected enterprise tools and uploaded artifacts first.
+        - If the required Microsoft Fabric connector is unavailable, explicitly state the missing integration and proceed with user-provided data only.
+        - Do not fabricate records, KPIs, IDs, approvals, or outcomes.
+        - Return actionable outputs with owners, due dates, assumptions, and risk level.
+
+      model:
+        model: "${LLM_SERVICE_GENERAL_MODEL_NAME}"
+        api_base: "${LLM_SERVICE_ENDPOINT}"
+        api_key: "${LLM_SERVICE_API_KEY}"
+
+      tools:
+        - tool_type: builtin-group
+          group_name: "data_analysis"
+        - tool_type: builtin-group
+          group_name: "web"
+
+      session_service:
+        type: ${PERSISTENCE_TYPE, sql}
+        database_url: ${DATABASE_URL, sqlite:///esg_sustainability_agent.db}
+        default_behavior: PERSISTENT
+
+      artifact_service:
+        type: ${ARTIFACT_SERVICE_TYPE, s3}
+        bucket_name: ${S3_BUCKET_NAME}
+        endpoint_url: ${S3_ENDPOINT_URL}
+        aws_region: ${AWS_REGION, us-east-1}
+        artifact_scope: namespace
+
+      artifact_handling_mode: reference
+      enable_embed_resolution: true
+      enable_artifact_content_instruction: true
+
+      agent_card:
+        description: "Produces ESG analytics, disclosures, and stakeholder-ready reporting packs."
+        defaultInputModes: ["text", "file"]
+        defaultOutputModes: ["text", "file"]
+        skills:
+          - id: "esg_reporting"
+            name: "ESG Reporting"
+            description: "Produces ESG analytics, disclosures, and stakeholder-ready reporting packs."
+
+      agent_card_publishing:
+        interval_seconds: 15
+
+      agent_discovery:
+        enabled: false
+
+      inter_agent_communication:
+        allow_list: []
+        request_timeout_seconds: 30

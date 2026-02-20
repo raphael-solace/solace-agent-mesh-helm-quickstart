@@ -1,0 +1,617 @@
+openapi: 3.1.0
+info:
+  title: OpenSearch Local API (Connector Friendly)
+  description: |
+    Local OpenAPI contract for the OpenSearch integration used in this repository.
+    The path and operation naming style follows OpenSearch API specification conventions,
+    but focuses on a pragmatic set of endpoints for agent connectors.
+  version: 1.1.0
+  contact:
+    name: SAM OpenSearch Integration
+servers:
+  - url: http://host.minikube.internal:9200
+    description: Minikube pod reachable host endpoint (recommended for SAM connectors)
+  - url: http://localhost:9200
+    description: Local host endpoint (scripts/CLI)
+tags:
+  - name: cluster
+    description: Cluster and node health endpoints
+  - name: indices
+    description: Index lifecycle and schema endpoints
+  - name: documents
+    description: Document ingest, retrieval, and search endpoints
+  - name: aliases
+    description: Alias inspection endpoints
+paths:
+  /:
+    get:
+      tags: [cluster]
+      summary: Get OpenSearch info
+      operationId: getOpenSearchInfo
+      responses:
+        "200":
+          description: OpenSearch root info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+
+  /_cluster/health:
+    get:
+      tags: [cluster]
+      summary: Get cluster health
+      operationId: clusterHealth
+      responses:
+        "200":
+          description: Cluster health response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterHealthResponse'
+
+  /_cluster/stats:
+    get:
+      tags: [cluster]
+      summary: Get cluster stats
+      operationId: clusterStats
+      responses:
+        "200":
+          description: Cluster stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+
+  /_nodes/stats:
+    get:
+      tags: [cluster]
+      summary: Get node stats
+      operationId: nodesStats
+      responses:
+        "200":
+          description: Node stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+
+  /_cat/indices:
+    get:
+      tags: [indices]
+      summary: List indices
+      operationId: listIndices
+      parameters:
+        - in: query
+          name: format
+          required: false
+          schema:
+            type: string
+            enum: [json, text]
+            default: json
+      responses:
+        "200":
+          description: Index list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GenericObject'
+            text/plain:
+              schema:
+                type: string
+
+  /_aliases:
+    get:
+      tags: [aliases]
+      summary: Get aliases
+      operationId: getAliases
+      responses:
+        "200":
+          description: Alias definitions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+
+  /{index}:
+    put:
+      tags: [indices]
+      summary: Create an index
+      operationId: createIndex
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIndexRequest'
+      responses:
+        "200":
+          description: Index created (or acknowledged)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AckResponse'
+        "400":
+          description: Validation or already exists error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      tags: [indices]
+      summary: Get index settings and mappings
+      operationId: getIndex
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+      responses:
+        "200":
+          description: Index metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+    delete:
+      tags: [indices]
+      summary: Delete an index
+      operationId: deleteIndex
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+      responses:
+        "200":
+          description: Index delete response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AckResponse'
+
+  /{index}/_mapping:
+    get:
+      tags: [indices]
+      summary: Get index mappings
+      operationId: getIndexMapping
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+      responses:
+        "200":
+          description: Index mappings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+    put:
+      tags: [indices]
+      summary: Update index mappings
+      operationId: putIndexMapping
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+      responses:
+        "200":
+          description: Mapping update response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AckResponse'
+
+  /{index}/_refresh:
+    post:
+      tags: [indices]
+      summary: Refresh index
+      operationId: refreshIndex
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+      responses:
+        "200":
+          description: Refresh response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+
+  /{index}/_stats:
+    get:
+      tags: [indices]
+      summary: Get index stats
+      operationId: getIndexStats
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+      responses:
+        "200":
+          description: Index stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+
+  /_bulk:
+    post:
+      tags: [documents]
+      summary: Bulk ingest documents
+      operationId: bulkIngest
+      parameters:
+        - in: query
+          name: refresh
+          required: false
+          schema:
+            type: string
+            enum: ["false", "true", "wait_for"]
+            default: "false"
+      requestBody:
+        required: true
+        content:
+          application/x-ndjson:
+            schema:
+              type: string
+              description: NDJSON payload (action line + source line)
+      responses:
+        "200":
+          description: Bulk result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkResponse'
+
+  /_msearch:
+    post:
+      tags: [documents]
+      summary: Execute multi-search
+      operationId: multiSearch
+      requestBody:
+        required: true
+        content:
+          application/x-ndjson:
+            schema:
+              type: string
+              description: NDJSON payload for multi-search requests
+      responses:
+        "200":
+          description: Multi-search result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+
+  /{index}/_doc:
+    post:
+      tags: [documents]
+      summary: Index a document with auto-generated id
+      operationId: indexDocumentAutoId
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+        - in: query
+          name: refresh
+          required: false
+          schema:
+            type: string
+            enum: ["false", "true", "wait_for"]
+            default: "false"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+      responses:
+        "201":
+          description: Document created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        "200":
+          description: Document indexed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+
+  /{index}/_doc/{id}:
+    put:
+      tags: [documents]
+      summary: Index or replace a document by id
+      operationId: putDocumentById
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+        - $ref: '#/components/parameters/documentId'
+        - in: query
+          name: refresh
+          required: false
+          schema:
+            type: string
+            enum: ["false", "true", "wait_for"]
+            default: "false"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenericObject'
+      responses:
+        "200":
+          description: Document indexed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        "201":
+          description: Document created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+    get:
+      tags: [documents]
+      summary: Get a document by id
+      operationId: getDocumentById
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+        - $ref: '#/components/parameters/documentId'
+      responses:
+        "200":
+          description: Document found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+        "404":
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags: [documents]
+      summary: Delete a document by id
+      operationId: deleteDocumentById
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+        - $ref: '#/components/parameters/documentId'
+        - in: query
+          name: refresh
+          required: false
+          schema:
+            type: string
+            enum: ["false", "true", "wait_for"]
+            default: "false"
+      responses:
+        "200":
+          description: Delete response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericObject'
+
+  /{index}/_count:
+    post:
+      tags: [documents]
+      summary: Count documents matching query
+      operationId: countDocuments
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CountRequest'
+      responses:
+        "200":
+          description: Count response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CountResponse'
+
+  /{index}/_search:
+    get:
+      tags: [documents]
+      summary: Search index documents (GET)
+      operationId: searchDocumentsGet
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+        - in: query
+          name: q
+          required: false
+          schema:
+            type: string
+          description: Lucene query string
+        - in: query
+          name: size
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+    post:
+      tags: [documents]
+      summary: Search index documents (DSL)
+      operationId: searchDocuments
+      parameters:
+        - $ref: '#/components/parameters/indexName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+
+components:
+  parameters:
+    indexName:
+      in: path
+      name: index
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    documentId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        minLength: 1
+
+  schemas:
+    GenericObject:
+      type: object
+      additionalProperties: true
+
+    ClusterHealthResponse:
+      type: object
+      properties:
+        cluster_name:
+          type: string
+        status:
+          type: string
+          enum: [green, yellow, red]
+        number_of_nodes:
+          type: integer
+        active_primary_shards:
+          type: integer
+        active_shards:
+          type: integer
+      required: [cluster_name, status]
+
+    CreateIndexRequest:
+      type: object
+      properties:
+        settings:
+          type: object
+          additionalProperties: true
+        mappings:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+
+    AckResponse:
+      type: object
+      properties:
+        acknowledged:
+          type: boolean
+        shards_acknowledged:
+          type: boolean
+        index:
+          type: string
+      required: [acknowledged]
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            type:
+              type: string
+            reason:
+              type: string
+        status:
+          type: integer
+      required: [error, status]
+
+    BulkResponse:
+      type: object
+      properties:
+        took:
+          type: integer
+        errors:
+          type: boolean
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required: [errors, items]
+
+    CountRequest:
+      type: object
+      properties:
+        query:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+
+    CountResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+        _shards:
+          type: object
+          additionalProperties: true
+      required: [count]
+
+    SearchRequest:
+      type: object
+      properties:
+        size:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        query:
+          type: object
+          additionalProperties: true
+        sort:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required: [query]
+
+    SearchResponse:
+      type: object
+      properties:
+        took:
+          type: integer
+        timed_out:
+          type: boolean
+        hits:
+          type: object
+          properties:
+            total:
+              oneOf:
+                - type: object
+                  properties:
+                    value:
+                      type: integer
+                    relation:
+                      type: string
+                  required: [value]
+                - type: integer
+            hits:
+              type: array
+              items:
+                type: object
+                properties:
+                  _index:
+                    type: string
+                  _id:
+                    type: string
+                  _score:
+                    type: number
+                  _source:
+                    type: object
+                    additionalProperties: true
+      required: [hits]
